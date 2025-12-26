@@ -1,0 +1,25 @@
+# Harbor Exporter - Multi-architecture Dockerfile
+# Supports: linux/amd64, linux/arm64
+
+ARG TARGETARCH
+ARG harbor_base_image_version
+ARG harbor_base_namespace
+FROM ${harbor_base_namespace}/harbor-exporter-base:${harbor_base_image_version}
+
+# Re-declare ARG after FROM
+ARG TARGETARCH
+
+# Copy architecture-specific binary
+COPY ./make/photon/exporter/binary/${TARGETARCH}/harbor_exporter /harbor/harbor_exporter
+COPY ./make/photon/exporter/entrypoint.sh ./make/photon/common/install_cert.sh /harbor/
+
+RUN chown -R harbor:harbor /etc/pki/tls/certs \
+    && chown -R harbor:harbor /harbor/ \
+    && chmod u+x /harbor/entrypoint.sh \
+    && chmod u+x /harbor/install_cert.sh \
+    && chmod u+x /harbor/harbor_exporter
+
+WORKDIR /harbor
+USER harbor
+
+ENTRYPOINT ["/harbor/entrypoint.sh"]

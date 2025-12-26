@@ -9,23 +9,23 @@ on:
       - main
       - release-*
     paths:
-      - 'make/photon/**'
-      - 'src/**'
-      - '.github/workflows/build-arm64.yml'
+      - "make/photon/**"
+      - "src/**"
+      - ".github/workflows/build-arm64.yml"
   workflow_dispatch:
     inputs:
       version_tag:
-        description: 'Version tag for images (e.g., v2.15.0-arm64)'
+        description: "Version tag for images (e.g., v2.15.0-arm64)"
         required: false
-        default: ''
+        default: ""
       push_images:
-        description: 'Push images to registry'
+        description: "Push images to registry"
         required: false
-        default: 'true'
+        default: "true"
         type: choice
         options:
-          - 'true'
-          - 'false'
+          - "true"
+          - "false"
 
 env:
   REGISTRY: ghcr.io
@@ -33,7 +33,7 @@ env:
   # Harbor 버전 정보
   TRIVY_VERSION: v0.65.0
   TRIVY_ADAPTER_VERSION: v0.34.0-rc.1
-  GO_VERSION: "1.24.6"
+  GO_VERSION: "1.23.2"
   NODE_VERSION: "16.18.0"
 
 jobs:
@@ -58,7 +58,7 @@ jobs:
           - registry
           - registryctl
           - trivy-adapter
-    
+
     permissions:
       contents: read
       packages: write
@@ -112,7 +112,8 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ========================================
-  # 2단계: 바이너리 컴파일 (ARM64 네이티브)
+  # 2단계: 바이너리 컴파일 (Docker 기반)
+  # Harbor는 swagger 코드 생성이 필요하므로 Docker에서 빌드
   # ========================================
   compile-binaries:
     runs-on: ubuntu-latest
@@ -123,14 +124,11 @@ jobs:
         include:
           - component: core
             binary_name: harbor_core
-            source_path: src/core
           - component: jobservice
             binary_name: harbor_jobservice
-            source_path: src/jobservice
           - component: registryctl
             binary_name: harbor_registryctl
-            source_path: src/registryctl
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -139,6 +137,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
 
       - name: Prepare version info
         id: version
@@ -153,37 +154,47 @@ jobs:
             echo "tag=${VERSION}-arm64" >> $GITHUB_OUTPUT
           fi
 
-      - name: Compile binary for AMD64
-        env:
-          CGO_ENABLED: 0
-          GOOS: linux
-          GOARCH: amd64
+      - name: Generate swagger APIs (for core)
+        if: matrix.component == 'core'
+        run: |
+          # Harbor Makefile의 gen_apis 타겟 실행
+          make gen_apis
+
+      - name: Compile binary using Docker (AMD64)
         run: |
           mkdir -p make/photon/${{ matrix.component }}/binary/amd64
-          
+
           LDFLAGS="-w -s"
           if [ "${{ matrix.component }}" = "core" ]; then
             LDFLAGS="${LDFLAGS} -X github.com/goharbor/harbor/src/pkg/version.GitCommit=${{ steps.version.outputs.gitcommit }} -X github.com/goharbor/harbor/src/pkg/version.ReleaseVersion=${{ steps.version.outputs.version }}"
           fi
-          
-          cd ${{ matrix.source_path }}
-          go build -ldflags "${LDFLAGS}" -o ../../make/photon/${{ matrix.component }}/binary/amd64/${{ matrix.binary_name }} .
 
-      - name: Compile binary for ARM64
-        env:
-          CGO_ENABLED: 0
-          GOOS: linux
-          GOARCH: arm64
+          docker run --rm \
+            -v $(pwd):/harbor \
+            -w /harbor/src/${{ matrix.component }} \
+            -e CGO_ENABLED=0 \
+            -e GOOS=linux \
+            -e GOARCH=amd64 \
+            golang:${{ env.GO_VERSION }} \
+            go build -ldflags "${LDFLAGS}" -o /harbor/make/photon/${{ matrix.component }}/binary/amd64/${{ matrix.binary_name }} .
+
+      - name: Compile binary using Docker (ARM64)
         run: |
           mkdir -p make/photon/${{ matrix.component }}/binary/arm64
-          
+
           LDFLAGS="-w -s"
           if [ "${{ matrix.component }}" = "core" ]; then
             LDFLAGS="${LDFLAGS} -X github.com/goharbor/harbor/src/pkg/version.GitCommit=${{ steps.version.outputs.gitcommit }} -X github.com/goharbor/harbor/src/pkg/version.ReleaseVersion=${{ steps.version.outputs.version }}"
           fi
-          
-          cd ${{ matrix.source_path }}
-          go build -ldflags "${LDFLAGS}" -o ../../make/photon/${{ matrix.component }}/binary/arm64/${{ matrix.binary_name }} .
+
+          docker run --rm \
+            -v $(pwd):/harbor \
+            -w /harbor/src/${{ matrix.component }} \
+            -e CGO_ENABLED=0 \
+            -e GOOS=linux \
+            -e GOARCH=arm64 \
+            golang:${{ env.GO_VERSION }} \
+            go build -ldflags "${LDFLAGS}" -o /harbor/make/photon/${{ matrix.component }}/binary/arm64/${{ matrix.binary_name }} .
 
       - name: Upload binary artifacts
         uses: actions/upload-artifact@v4
@@ -198,7 +209,7 @@ jobs:
   compile-registry:
     runs-on: ubuntu-latest
     needs: build-base-images
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -208,34 +219,18 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Clone distribution source
-        run: |
-          git clone -b release/2.8 https://github.com/goharbor/distribution.git /tmp/distribution
-
-      - name: Compile registry for AMD64
-        env:
-          CGO_ENABLED: 0
-          GOOS: linux
-          GOARCH: amd64
-          GO111MODULE: auto
+      - name: Clone and build distribution (AMD64)
         run: |
           mkdir -p make/photon/registry/binary/amd64
+          git clone -b release/2.8 https://github.com/goharbor/distribution.git /tmp/distribution
           cd /tmp/distribution
-          make PREFIX=/tmp/output-amd64 clean binaries
-          cp /tmp/output-amd64/bin/registry ${{ github.workspace }}/make/photon/registry/binary/amd64/registry
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ${{ github.workspace }}/make/photon/registry/binary/amd64/registry ./cmd/registry
 
-      - name: Compile registry for ARM64
-        env:
-          CGO_ENABLED: 0
-          GOOS: linux
-          GOARCH: arm64
-          GO111MODULE: auto
+      - name: Build distribution (ARM64)
         run: |
           mkdir -p make/photon/registry/binary/arm64
           cd /tmp/distribution
-          make clean
-          make PREFIX=/tmp/output-arm64 binaries
-          cp /tmp/output-arm64/bin/registry ${{ github.workspace }}/make/photon/registry/binary/arm64/registry
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o ${{ github.workspace }}/make/photon/registry/binary/arm64/registry ./cmd/registry
 
       - name: Upload registry binary
         uses: actions/upload-artifact@v4
@@ -250,7 +245,7 @@ jobs:
   compile-trivy-adapter:
     runs-on: ubuntu-latest
     needs: build-base-images
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -260,32 +255,18 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Clone trivy adapter source
-        run: |
-          git clone https://github.com/goharbor/harbor-scanner-trivy.git /tmp/trivy-adapter
-          cd /tmp/trivy-adapter && git checkout ${{ env.TRIVY_ADAPTER_VERSION }}
-
-      - name: Compile trivy adapter for AMD64
-        env:
-          CGO_ENABLED: 0
-          GOOS: linux
-          GOARCH: amd64
-          GO111MODULE: on
+      - name: Clone and build trivy adapter (AMD64)
         run: |
           mkdir -p make/photon/trivy-adapter/binary/amd64
-          cd /tmp/trivy-adapter
-          go build -o ${{ github.workspace }}/make/photon/trivy-adapter/binary/amd64/scanner-trivy cmd/scanner-trivy/main.go
+          git clone https://github.com/goharbor/harbor-scanner-trivy.git /tmp/trivy-adapter
+          cd /tmp/trivy-adapter && git checkout ${{ env.TRIVY_ADAPTER_VERSION }}
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -o ${{ github.workspace }}/make/photon/trivy-adapter/binary/amd64/scanner-trivy cmd/scanner-trivy/main.go
 
-      - name: Compile trivy adapter for ARM64
-        env:
-          CGO_ENABLED: 0
-          GOOS: linux
-          GOARCH: arm64
-          GO111MODULE: on
+      - name: Build trivy adapter (ARM64)
         run: |
           mkdir -p make/photon/trivy-adapter/binary/arm64
           cd /tmp/trivy-adapter
-          go build -o ${{ github.workspace }}/make/photon/trivy-adapter/binary/arm64/scanner-trivy cmd/scanner-trivy/main.go
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 GO111MODULE=on go build -o ${{ github.workspace }}/make/photon/trivy-adapter/binary/arm64/scanner-trivy cmd/scanner-trivy/main.go
 
       - name: Download Trivy binary for AMD64
         run: |
@@ -305,16 +286,52 @@ jobs:
           retention-days: 1
 
   # ========================================
-  # 5단계: 최종 이미지 빌드 및 푸시
+  # 5단계: Exporter 바이너리 빌드
+  # ========================================
+  compile-exporter:
+    runs-on: ubuntu-latest
+    needs: build-base-images
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Compile exporter (AMD64)
+        run: |
+          mkdir -p make/photon/exporter/binary/amd64
+          cd src/cmd/exporter
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-w -s" -o ${{ github.workspace }}/make/photon/exporter/binary/amd64/harbor_exporter .
+
+      - name: Compile exporter (ARM64)
+        run: |
+          mkdir -p make/photon/exporter/binary/arm64
+          cd src/cmd/exporter
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-w -s" -o ${{ github.workspace }}/make/photon/exporter/binary/arm64/harbor_exporter .
+
+      - name: Upload exporter binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-exporter
+          path: make/photon/exporter/binary/
+          retention-days: 1
+
+  # ========================================
+  # 6단계: 최종 이미지 빌드 및 푸시
   # ========================================
   build-final-images:
     runs-on: ubuntu-latest
-    needs: 
+    needs:
       - build-base-images
       - compile-binaries
       - compile-registry
       - compile-trivy-adapter
-    
+      - compile-exporter
+
     strategy:
       fail-fast: false
       matrix:
@@ -331,7 +348,7 @@ jobs:
           - registry
           - registryctl
           - trivy-adapter
-    
+
     permissions:
       contents: read
       packages: write
@@ -364,51 +381,16 @@ jobs:
           fi
 
       - name: Download binary artifacts
-        if: contains(fromJSON('["core", "jobservice", "registryctl", "registry", "trivy-adapter"]'), matrix.component)
+        if: contains(fromJSON('["core", "jobservice", "registryctl", "registry", "trivy-adapter", "exporter"]'), matrix.component)
         uses: actions/download-artifact@v4
         with:
           name: binary-${{ matrix.component }}
           path: make/photon/${{ matrix.component }}/binary/
 
-      - name: Prepare multi-arch Dockerfile
+      - name: Set binary permissions
+        if: contains(fromJSON('["core", "jobservice", "registryctl", "registry", "trivy-adapter", "exporter"]'), matrix.component)
         run: |
-          COMPONENT="${{ matrix.component }}"
-          DOCKERFILE="make/photon/${COMPONENT}/Dockerfile"
-          
-          # 바이너리가 필요한 컴포넌트의 경우 multi-arch Dockerfile 생성
-          if [[ "$COMPONENT" =~ ^(core|jobservice|registryctl|registry)$ ]]; then
-            cat > "${DOCKERFILE}.multiarch" << 'EOF'
-          ARG TARGETARCH
-          ARG harbor_base_image_version
-          ARG harbor_base_namespace
-          FROM ${harbor_base_namespace}/harbor-${{ matrix.component }}-base:${harbor_base_image_version}
-          
-          ARG TARGETARCH
-          COPY ./make/photon/${{ matrix.component }}/binary/${TARGETARCH}/* /harbor/
-          EOF
-            
-            # 원본 Dockerfile의 나머지 부분 추가 (FROM 이후)
-            tail -n +4 "${DOCKERFILE}" >> "${DOCKERFILE}.multiarch"
-          elif [[ "$COMPONENT" == "trivy-adapter" ]]; then
-            cat > "${DOCKERFILE}.multiarch" << 'EOF'
-          ARG TARGETARCH
-          ARG harbor_base_image_version
-          ARG harbor_base_namespace
-          FROM ${harbor_base_namespace}/harbor-trivy-adapter-base:${harbor_base_image_version}
-          
-          ARG TARGETARCH
-          COPY ./make/photon/trivy-adapter/binary/${TARGETARCH}/scanner-trivy /home/scanner/bin/scanner-trivy
-          COPY ./make/photon/trivy-adapter/binary/${TARGETARCH}/trivy /usr/local/bin/trivy
-          
-          HEALTHCHECK --interval=30s --timeout=10s --retries=3 CMD curl --fail -s http://localhost:8080/probe/healthy || exit 1
-          
-          USER scanner
-          ENTRYPOINT ["/home/scanner/bin/scanner-trivy"]
-          EOF
-          else
-            # 바이너리가 필요 없는 컴포넌트는 원본 Dockerfile 사용
-            cp "${DOCKERFILE}" "${DOCKERFILE}.multiarch"
-          fi
+          find make/photon/${{ matrix.component }}/binary -type f -exec chmod +x {} \;
 
       - name: Prepare versions file
         run: |
@@ -420,22 +402,16 @@ jobs:
           TRIVY_ADAPTER_VERSION: ${{ env.TRIVY_ADAPTER_VERSION }}
           EOF
 
-      - name: Set binary permissions
-        if: contains(fromJSON('["core", "jobservice", "registryctl", "registry", "trivy-adapter"]'), matrix.component)
-        run: |
-          chmod +x make/photon/${{ matrix.component }}/binary/*/
-
       - name: Build and push final image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./make/photon/${{ matrix.component }}/Dockerfile${{ contains(fromJSON('["core", "jobservice", "registryctl", "registry", "trivy-adapter"]'), matrix.component) && '.multiarch' || '' }}
+          file: ./make/photon/${{ matrix.component }}/Dockerfile${{ contains(fromJSON('["core", "jobservice", "registryctl", "registry", "trivy-adapter", "exporter"]'), matrix.component) && '.multiarch' || '' }}
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event.inputs.push_images != 'false' }}
           build-args: |
             harbor_base_image_version=${{ steps.version.outputs.tag }}
             harbor_base_namespace=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}
-            TARGETARCH=arm64
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/harbor-${{ matrix.component }}:${{ steps.version.outputs.tag }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/harbor-${{ matrix.component }}:latest
@@ -446,13 +422,13 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ========================================
-  # 6단계: 빌드 결과 요약
+  # 7단계: 빌드 결과 요약
   # ========================================
   summary:
     runs-on: ubuntu-latest
     needs: build-final-images
     if: always()
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -465,7 +441,7 @@ jobs:
           else
             TAG="${VERSION}-arm64"
           fi
-          
+
           echo "# Harbor ARM64 Build Summary 🚀" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Build Information" >> $GITHUB_STEP_SUMMARY
