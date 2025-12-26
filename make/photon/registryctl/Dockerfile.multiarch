@@ -1,0 +1,26 @@
+# Harbor RegistryCtl - Multi-architecture Dockerfile
+# Supports: linux/amd64, linux/arm64
+
+ARG TARGETARCH
+ARG harbor_base_image_version
+ARG harbor_base_namespace
+FROM ${harbor_base_namespace}/harbor-registryctl-base:${harbor_base_image_version}
+
+# Re-declare ARG after FROM
+ARG TARGETARCH
+
+COPY ./make/photon/common/install_cert.sh /harbor/
+COPY ./make/photon/registryctl/start.sh /harbor/
+
+# Copy architecture-specific binary
+COPY ./make/photon/registryctl/binary/${TARGETARCH}/harbor_registryctl /harbor/harbor_registryctl
+
+RUN chown -R harbor:harbor /etc/pki/tls/certs \
+    && chown -R harbor:harbor /harbor/ \
+    && chmod u+x /harbor/start.sh \
+    && chmod u+x /harbor/install_cert.sh \
+    && chmod u+x /harbor/harbor_registryctl
+
+WORKDIR /harbor/
+USER harbor
+ENTRYPOINT ["/harbor/start.sh"]

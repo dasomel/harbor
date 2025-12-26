@@ -1,0 +1,23 @@
+# Harbor Trivy Adapter - Multi-architecture Dockerfile
+# Supports: linux/amd64, linux/arm64
+
+ARG TARGETARCH
+ARG harbor_base_image_version
+ARG harbor_base_namespace
+FROM ${harbor_base_namespace}/harbor-trivy-adapter-base:${harbor_base_image_version}
+
+# Re-declare ARG after FROM
+ARG TARGETARCH
+
+# Copy architecture-specific binaries
+COPY ./make/photon/trivy-adapter/binary/${TARGETARCH}/scanner-trivy /home/scanner/bin/scanner-trivy
+COPY ./make/photon/trivy-adapter/binary/${TARGETARCH}/trivy /usr/local/bin/trivy
+
+RUN chmod +x /home/scanner/bin/scanner-trivy \
+    && chmod +x /usr/local/bin/trivy \
+    && chown -R scanner:scanner /home/scanner
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 CMD curl --fail -s http://localhost:8080/probe/healthy || exit 1
+
+USER scanner
+ENTRYPOINT ["/home/scanner/bin/scanner-trivy"]
