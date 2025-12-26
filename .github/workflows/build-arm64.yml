@@ -465,6 +465,8 @@ jobs:
           build-args: |
             harbor_base_image_version=${{ steps.version.outputs.tag }}
             harbor_base_namespace=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}
+            NODE=node:${{ env.NODE_VERSION }}
+            npm_registry=https://registry.npmjs.org
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/harbor-${{ matrix.component }}:${{ steps.version.outputs.tag }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/harbor-${{ matrix.component }}:latest
