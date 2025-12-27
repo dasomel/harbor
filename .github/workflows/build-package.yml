@@ -112,12 +112,29 @@ jobs:
           docker images | grep goharbor || true
 
           # Tag and push images (continue on error for individual images)
+          pushed_images=""
           for image in $(docker images --format "{{.Repository}}:{{.Tag}}" | grep "goharbor.*:${Harbor_Assets_Version}" || true); do
              image_name=$(echo $image | sed 's|goharbor/||' | sed "s|:${Harbor_Assets_Version}||")
              ghcr_image="ghcr.io/${{ github.repository_owner }}/harbor/${image_name}:${Harbor_Assets_Version}"
              echo "Tagging $image as $ghcr_image"
              docker tag $image $ghcr_image || true
-             docker push $ghcr_image || true
+             if docker push $ghcr_image; then
+               pushed_images="${pushed_images} harbor%2F${image_name}"
+             fi
+          done
+          echo "PUSHED_IMAGES=${pushed_images}" >> $GITHUB_ENV
+
+      - name: Set packages to public
+        if: success()
+        run: |
+          for pkg in $PUSHED_IMAGES; do
+            echo "Setting $pkg to public..."
+            curl -X PATCH \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/user/packages/container/${pkg}" \
+              -d '{"visibility":"public"}' || echo "Failed to set $pkg to public (may already be public)"
           done
 
       - name: Upload Artifacts
