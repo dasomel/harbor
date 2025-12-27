@@ -1,4 +1,5 @@
 # Harbor
+
 [![CI](https://github.com/goharbor/harbor/actions/workflows/CI.yml/badge.svg)](https://github.com/goharbor/harbor/actions/workflows/CI.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/goharbor/harbor)](https://goreportcard.com/report/github.com/goharbor/harbor)
 [![Coverage Status](https://codecov.io/gh/goharbor/harbor/branch/main/graph/badge.svg)](https://codecov.io/gh/goharbor/harbor)
@@ -8,6 +9,53 @@
 ![OCI Distribution Conformance Tests](https://github.com/goharbor/harbor/workflows/CONFORMANCE_TEST/badge.svg)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fgoharbor%2Fharbor.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fgoharbor%2Fharbor?ref=badge_shield)
 [![Helm Chart on Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/harbor)](https://artifacthub.io/packages/helm/harbor/harbor)
+
+---
+
+## 🚀 This Fork - Multi-Architecture Harbor Images
+
+This is a fork of the official [goharbor/harbor](https://github.com/goharbor/harbor) repository that provides:
+
+- **Multi-architecture container images** (AMD64 + ARM64)
+- **Pre-built images on GitHub Container Registry (ghcr.io)**
+- **Automated builds via GitHub Actions**
+
+### Available Images
+
+All images are available at `ghcr.io/dasomel/harbor/`:
+
+| Image | Description | Pull Command |
+|-------|-------------|--------------|
+| `harbor-core` | Harbor Core Service | `docker pull ghcr.io/dasomel/harbor/harbor-core:latest` |
+| `harbor-portal` | Harbor Web UI | `docker pull ghcr.io/dasomel/harbor/harbor-portal:latest` |
+| `harbor-db` | PostgreSQL Database | `docker pull ghcr.io/dasomel/harbor/harbor-db:latest` |
+| `harbor-registry` | Docker Registry | `docker pull ghcr.io/dasomel/harbor/harbor-registry:latest` |
+| `harbor-registryctl` | Registry Controller | `docker pull ghcr.io/dasomel/harbor/harbor-registryctl:latest` |
+| `harbor-jobservice` | Async Job Service | `docker pull ghcr.io/dasomel/harbor/harbor-jobservice:latest` |
+| `harbor-nginx` | Reverse Proxy | `docker pull ghcr.io/dasomel/harbor/harbor-nginx:latest` |
+| `harbor-redis` | Redis Cache | `docker pull ghcr.io/dasomel/harbor/harbor-redis:latest` |
+| `harbor-log` | Log Collector | `docker pull ghcr.io/dasomel/harbor/harbor-log:latest` |
+| `harbor-exporter` | Metrics Exporter | `docker pull ghcr.io/dasomel/harbor/harbor-exporter:latest` |
+| `harbor-prepare` | Configuration Generator | `docker pull ghcr.io/dasomel/harbor/harbor-prepare:latest` |
+| `harbor-trivy-adapter` | Trivy Security Scanner | `docker pull ghcr.io/dasomel/harbor/harbor-trivy-adapter:latest` |
+
+### Usage
+
+```bash
+# Pull a specific image
+docker pull ghcr.io/dasomel/harbor/harbor-core:v2.12.2-build.10
+
+# Or use latest
+docker pull ghcr.io/dasomel/harbor/harbor-core:latest
+```
+
+### License
+
+This fork is distributed under the same [Apache License 2.0](LICENSE) as the original Harbor project.
+All original copyrights and attributions are preserved.
+
+---
+
 </br>
 
 |![notification](https://raw.githubusercontent.com/goharbor/website/master/docs/img/readme/bell-outline-badged.svg)Community Meeting|
@@ -28,18 +76,18 @@ Harbor is hosted by the [Cloud Native Computing Foundation](https://cncf.io) (CN
 
 ## Features
 
-* **Cloud native registry**: With support for both container images and [Helm](https://helm.sh) charts, Harbor serves as registry for cloud native environments like container runtimes and orchestration platforms.
-* **Role based access control**: Users access different repositories through 'projects' and a user can have different permission for images or Helm charts under a project.
-* **Policy based replication**: Images and charts can be replicated (synchronized) between multiple registry instances based on policies with using filters (repository, tag and label). Harbor automatically retries a replication if it encounters any errors. This can be used to assist loadbalancing, achieve high availability, and facilitate multi-datacenter deployments in hybrid and multi-cloud scenarios.
-* **Vulnerability Scanning**: Harbor scans images regularly for vulnerabilities and has policy checks to prevent vulnerable images from being deployed.
-* **LDAP/AD support**: Harbor integrates with existing enterprise LDAP/AD for user authentication and management, and supports importing LDAP groups into Harbor that can then be given permissions to specific projects.
-* **OIDC support**: Harbor leverages OpenID Connect (OIDC) to verify the identity of users authenticated by an external authorization server or identity provider. Single sign-on can be enabled to log into the Harbor portal.
-* **Image deletion & garbage collection**: System admin can run garbage collection jobs so that images(dangling manifests and unreferenced blobs) can be deleted and their space can be freed up periodically.
-* **Notary**: Support signing container images using Docker Content Trust (leveraging Notary) for guaranteeing authenticity and provenance.  In addition, policies that prevent unsigned images from being deployed can also be activated.
-* **Graphical user portal**: User can easily browse, search repositories and manage projects.
-* **Auditing**: All the operations to the repositories are tracked through logs.
-* **RESTful API**: RESTful APIs are provided to facilitate administrative operations, and are easy to use for integration with external systems. An embedded Swagger UI is available for exploring and testing the API.
-* **Easy deployment**: Harbor can be deployed via Docker compose as well Helm Chart, and a Harbor Operator was added recently as well.
+- **Cloud native registry**: With support for both container images and [Helm](https://helm.sh) charts, Harbor serves as registry for cloud native environments like container runtimes and orchestration platforms.
+- **Role based access control**: Users access different repositories through 'projects' and a user can have different permission for images or Helm charts under a project.
+- **Policy based replication**: Images and charts can be replicated (synchronized) between multiple registry instances based on policies with using filters (repository, tag and label). Harbor automatically retries a replication if it encounters any errors. This can be used to assist loadbalancing, achieve high availability, and facilitate multi-datacenter deployments in hybrid and multi-cloud scenarios.
+- **Vulnerability Scanning**: Harbor scans images regularly for vulnerabilities and has policy checks to prevent vulnerable images from being deployed.
+- **LDAP/AD support**: Harbor integrates with existing enterprise LDAP/AD for user authentication and management, and supports importing LDAP groups into Harbor that can then be given permissions to specific projects.
+- **OIDC support**: Harbor leverages OpenID Connect (OIDC) to verify the identity of users authenticated by an external authorization server or identity provider. Single sign-on can be enabled to log into the Harbor portal.
+- **Image deletion & garbage collection**: System admin can run garbage collection jobs so that images(dangling manifests and unreferenced blobs) can be deleted and their space can be freed up periodically.
+- **Notary**: Support signing container images using Docker Content Trust (leveraging Notary) for guaranteeing authenticity and provenance.  In addition, policies that prevent unsigned images from being deployed can also be activated.
+- **Graphical user portal**: User can easily browse, search repositories and manage projects.
+- **Auditing**: All the operations to the repositories are tracked through logs.
+- **RESTful API**: RESTful APIs are provided to facilitate administrative operations, and are easy to use for integration with external systems. An embedded Swagger UI is available for exploring and testing the API.
+- **Easy deployment**: Harbor can be deployed via Docker compose as well Helm Chart, and a Harbor Operator was added recently as well.
 
 ## Architecture
 
@@ -47,8 +95,8 @@ For learning the architecture design of Harbor, check the document [Architecture
 
 ## API
 
-* Harbor RESTful API: The APIs for most administrative operations of Harbor and can be used to perform integrations with Harbor programmatically.
-  * Part 1: [New or changed APIs](https://editor.swagger.io/?url=https://raw.githubusercontent.com/goharbor/harbor/main/api/v2.0/swagger.yaml)
+- Harbor RESTful API: The APIs for most administrative operations of Harbor and can be used to perform integrations with Harbor programmatically.
+  - Part 1: [New or changed APIs](https://editor.swagger.io/?url=https://raw.githubusercontent.com/goharbor/harbor/main/api/v2.0/swagger.yaml)
 
 ## Install & Run
 
@@ -56,7 +104,7 @@ For learning the architecture design of Harbor, check the document [Architecture
 
 **On a Linux host:** docker 20.10.10-ce+ and docker-compose 1.18.0+ .
 
-Download binaries of **[Harbor release ](https://github.com/goharbor/harbor/releases)** and follow **[Installation & Configuration Guide](https://goharbor.io/docs/latest/install-config/)** to install Harbor.
+Download binaries of **[Harbor release](https://github.com/goharbor/harbor/releases)** and follow **[Installation & Configuration Guide](https://goharbor.io/docs/latest/install-config/)** to install Harbor.
 
 If you want to deploy Harbor on Kubernetes, please use the **[Harbor chart](https://github.com/goharbor/harbor-helm)**.
 
@@ -70,21 +118,21 @@ Check the OCI distribution conformance tests [report](https://storage.googleapis
 
 The [compatibility list](https://goharbor.io/docs/edge/install-config/harbor-compatibility-list/) document provides compatibility information for the Harbor components.
 
-* [Replication adapters](https://goharbor.io/docs/edge/install-config/harbor-compatibility-list/#replication-adapters)
-* [OIDC adapters](https://goharbor.io/docs/edge/install-config/harbor-compatibility-list/#oidc-adapters)
-* [Scanner adapters](https://goharbor.io/docs/edge/install-config/harbor-compatibility-list/#scanner-adapters)
+- [Replication adapters](https://goharbor.io/docs/edge/install-config/harbor-compatibility-list/#replication-adapters)
+- [OIDC adapters](https://goharbor.io/docs/edge/install-config/harbor-compatibility-list/#oidc-adapters)
+- [Scanner adapters](https://goharbor.io/docs/edge/install-config/harbor-compatibility-list/#scanner-adapters)
 
 ## Community
 
-* **Twitter:** [@project_harbor](https://twitter.com/project_harbor)
-* **User Group:** Join Harbor user email group: [harbor-users@lists.cncf.io](https://lists.cncf.io/g/harbor-users) to get update of Harbor's news, features, releases, or to provide suggestion and feedback.
-* **Developer Group:** Join Harbor developer group: [harbor-dev@lists.cncf.io](https://lists.cncf.io/g/harbor-dev) for discussion on Harbor development and contribution.
-* **Slack:** Join Harbor's community for discussion and ask questions: [Cloud Native Computing Foundation](https://slack.cncf.io/), channel: [#harbor](https://cloud-native.slack.com/messages/harbor/) and [#harbor-dev](https://cloud-native.slack.com/messages/harbor-dev/)
+- **Twitter:** [@project_harbor](https://twitter.com/project_harbor)
+- **User Group:** Join Harbor user email group: [harbor-users@lists.cncf.io](https://lists.cncf.io/g/harbor-users) to get update of Harbor's news, features, releases, or to provide suggestion and feedback.
+- **Developer Group:** Join Harbor developer group: [harbor-dev@lists.cncf.io](https://lists.cncf.io/g/harbor-dev) for discussion on Harbor development and contribution.
+- **Slack:** Join Harbor's community for discussion and ask questions: [Cloud Native Computing Foundation](https://slack.cncf.io/), channel: [#harbor](https://cloud-native.slack.com/messages/harbor/) and [#harbor-dev](https://cloud-native.slack.com/messages/harbor-dev/)
 
 ## Demos
 
-* **[Live Demo](https://demo.goharbor.io)** - A demo environment with the latest Harbor stable build installed. For additional information please refer to [this page](https://goharbor.io/docs/latest/install-config/demo-server/).
-* **[Video Demos](https://github.com/goharbor/harbor/wiki/Video-demos-for-Harbor)** - Demos for Harbor features and continuously updated.
+- **[Live Demo](https://demo.goharbor.io)** - A demo environment with the latest Harbor stable build installed. For additional information please refer to [this page](https://goharbor.io/docs/latest/install-config/demo-server/).
+- **[Video Demos](https://github.com/goharbor/harbor/wiki/Video-demos-for-Harbor)** - Demos for Harbor features and continuously updated.
 
 ## Partners and Users
 
@@ -110,8 +158,7 @@ Harbor is available under the [Apache 2 license](LICENSE).
 
 This project uses open source components which have additional licensing terms.  The official docker images and licensing terms for these open source components can be found at the following locations:
 
-* Photon OS 1.0: [docker image](https://hub.docker.com/_/photon/), [license](https://github.com/vmware/photon/blob/master/COPYING)
-
+- Photon OS 1.0: [docker image](https://hub.docker.com/_/photon/), [license](https://github.com/vmware/photon/blob/master/COPYING)
 
 ## Fossa Status
 
