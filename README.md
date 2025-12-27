@@ -43,7 +43,7 @@ All images are available at `ghcr.io/dasomel/harbor/`:
 
 ```bash
 # Pull a specific image
-docker pull ghcr.io/dasomel/harbor/harbor-core:v2.12.2-build.10
+docker pull ghcr.io/dasomel/harbor/harbor-core:v2.15.0-build.10
 
 # Or use latest
 docker pull ghcr.io/dasomel/harbor/harbor-core:latest
