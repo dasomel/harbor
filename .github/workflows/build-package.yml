@@ -98,7 +98,17 @@ jobs:
           # uploader harbor-online-installer-latest.tgz       $harbor_target_bucket
           echo "BUILD_BUNDLE=$harbor_offline_build_bundle" >> $GITHUB_ENV
 
-          publishImage $target_branch $Harbor_Assets_Version "${{ secrets.DOCKER_HUB_USERNAME }}" "${{ secrets.DOCKER_HUB_PASSWORD }}"
+
+          # Publish to GitHub Container Registry (ghcr.io)
+          echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+          # Tag and push core images
+          for image in harbor-portal harbor-core harbor-jobservice harbor-registryctl harbor-db redis-photon nginx-photon registry-photon trivy-adapter-photon; do
+             full_image="goharbor/${image}:${Harbor_Assets_Version}"
+             ghcr_image="ghcr.io/${{ github.repository_owner }}/harbor/${image}:${Harbor_Assets_Version}"
+             docker tag $full_image $ghcr_image
+             docker push $ghcr_image
+          done
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
