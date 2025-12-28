@@ -149,7 +149,7 @@ jobs:
           if [ -n "${{ github.event.inputs.version_tag }}" ]; then
             echo "tag=${{ github.event.inputs.version_tag }}" >> $GITHUB_OUTPUT
           else
-            echo "tag=${VERSION}-arm64" >> $GITHUB_OUTPUT
+            echo "tag=${VERSION}-build.${{ github.run_number }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Generate swagger APIs (for core)
@@ -427,7 +427,7 @@ jobs:
           if [ -n "${{ github.event.inputs.version_tag }}" ]; then
             echo "tag=${{ github.event.inputs.version_tag }}" >> $GITHUB_OUTPUT
           else
-            echo "tag=${VERSION}-arm64" >> $GITHUB_OUTPUT
+            echo "tag=${VERSION}-build.${{ github.run_number }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Download binary artifacts
@@ -491,7 +491,7 @@ jobs:
           if [ -n "${{ github.event.inputs.version_tag }}" ]; then
             TAG="${{ github.event.inputs.version_tag }}"
           else
-            TAG="${VERSION}-arm64"
+            TAG="${VERSION}-build.${{ github.run_number }}"
           fi
 
           echo "# Harbor ARM64 Build Summary 🚀" >> $GITHUB_STEP_SUMMARY
