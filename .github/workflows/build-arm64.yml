@@ -1,6 +1,6 @@
-name: "Build ARM64 Images"
+name: "Build Multi-Arch Images"
 
-# ARM64 이미지 빌드 및 GitHub Container Registry 배포
+# Multi-architecture (AMD64 + ARM64) 이미지 빌드 및 GitHub Container Registry 배포
 # 트리거: main/release 브랜치 푸시 또는 수동 실행
 
 on:
@@ -8,10 +8,6 @@ on:
     branches:
       - main
       - release-*
-    paths:
-      - "make/photon/**"
-      - "src/**"
-      - ".github/workflows/build-arm64.yml"
   workflow_dispatch:
     inputs:
       version_tag:
@@ -29,11 +25,11 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAMESPACE: ${{ github.repository_owner }}/harbor
+  IMAGE_NAMESPACE: ${{ github.repository_owner }}
   # Harbor 버전 정보
   TRIVY_VERSION: v0.65.0
   TRIVY_ADAPTER_VERSION: v0.34.0-rc.1
-  GO_VERSION: "1.24.6"
+  GO_VERSION: "1.23.2"
   NODE_VERSION: "16.18.0"
 
 jobs:
@@ -86,12 +82,13 @@ jobs:
       - name: Prepare version tag
         id: version
         run: |
+          VERSION=$(cat VERSION | tr -d '\n')
           if [ -n "${{ github.event.inputs.version_tag }}" ]; then
             echo "tag=${{ github.event.inputs.version_tag }}" >> $GITHUB_OUTPUT
           else
-            VERSION=$(cat VERSION | tr -d '\n')
-            echo "tag=${VERSION}-arm64" >> $GITHUB_OUTPUT
+            echo "tag=${VERSION}-build.${{ github.run_number }}" >> $GITHUB_OUTPUT
           fi
+          echo "base_tag=${VERSION}" >> $GITHUB_OUTPUT
           echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
 
       - name: Build and push base image
