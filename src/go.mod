@@ -1,6 +1,6 @@
 module github.com/goharbor/harbor/src
 
-go 1.23.2
+go 1.24.6
 
 require (
 	github.com/CloudNativeAI/model-spec v0.0.5
