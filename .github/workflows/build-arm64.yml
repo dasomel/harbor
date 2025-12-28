@@ -25,7 +25,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAMESPACE: ${{ github.repository_owner }}
+  IMAGE_NAMESPACE: dasomel/goharbor
   # Harbor 버전 정보
   TRIVY_VERSION: v0.65.0
   TRIVY_ADAPTER_VERSION: v0.34.0-rc.1

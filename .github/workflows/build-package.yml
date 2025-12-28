@@ -120,7 +120,7 @@ jobs:
           pushed_images=""
           for image_name in $REQUIRED_IMAGES; do
              source_image="goharbor/${image_name}:${Harbor_Assets_Version}"
-             ghcr_base="ghcr.io/${{ github.repository_owner }}/${image_name}"
+             ghcr_base="ghcr.io/dasomel/goharbor/${image_name}"
              
              if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "^${source_image}$"; then
                echo "Pushing ${image_name}..."
@@ -144,12 +144,12 @@ jobs:
         if: success()
         run: |
           for pkg in $PUSHED_IMAGES; do
-            echo "Setting $pkg to public..."
+            echo "Setting goharbor/$pkg to public..."
             curl -s -X PATCH \
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/user/packages/container/${pkg}" \
+              "https://api.github.com/user/packages/container/goharbor%2F${pkg}" \
               -d '{"visibility":"public"}' || echo "Failed to set $pkg to public"
           done
 

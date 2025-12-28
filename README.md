@@ -22,31 +22,31 @@ This is a fork of the official [goharbor/harbor](https://github.com/goharbor/har
 
 ### Available Images
 
-All images are available at `ghcr.io/dasomel/` and are compatible with the official Harbor Helm chart:
+All images are available at `ghcr.io/dasomel/goharbor/` and are compatible with the official Harbor Helm chart:
 
 | Image | Description | Pull Command |
 | ----- | ----------- | ------------ |
-| `harbor-core` | Harbor Core Service | `docker pull ghcr.io/dasomel/harbor-core:latest` |
-| `harbor-portal` | Harbor Web UI | `docker pull ghcr.io/dasomel/harbor-portal:latest` |
-| `harbor-db` | PostgreSQL Database | `docker pull ghcr.io/dasomel/harbor-db:latest` |
-| `registry-photon` | Docker Registry | `docker pull ghcr.io/dasomel/registry-photon:latest` |
-| `harbor-registryctl` | Registry Controller | `docker pull ghcr.io/dasomel/harbor-registryctl:latest` |
-| `harbor-jobservice` | Async Job Service | `docker pull ghcr.io/dasomel/harbor-jobservice:latest` |
-| `nginx-photon` | Reverse Proxy | `docker pull ghcr.io/dasomel/nginx-photon:latest` |
-| `redis-photon` | Redis Cache | `docker pull ghcr.io/dasomel/redis-photon:latest` |
-| `harbor-log` | Log Collector | `docker pull ghcr.io/dasomel/harbor-log:latest` |
-| `harbor-exporter` | Metrics Exporter | `docker pull ghcr.io/dasomel/harbor-exporter:latest` |
-| `harbor-prepare` | Configuration Generator | `docker pull ghcr.io/dasomel/harbor-prepare:latest` |
-| `trivy-adapter-photon` | Trivy Security Scanner | `docker pull ghcr.io/dasomel/trivy-adapter-photon:latest` |
+| `harbor-core` | Harbor Core Service | `docker pull ghcr.io/dasomel/goharbor/harbor-core:latest` |
+| `harbor-portal` | Harbor Web UI | `docker pull ghcr.io/dasomel/goharbor/harbor-portal:latest` |
+| `harbor-db` | PostgreSQL Database | `docker pull ghcr.io/dasomel/goharbor/harbor-db:latest` |
+| `registry-photon` | Docker Registry | `docker pull ghcr.io/dasomel/goharbor/registry-photon:latest` |
+| `harbor-registryctl` | Registry Controller | `docker pull ghcr.io/dasomel/goharbor/harbor-registryctl:latest` |
+| `harbor-jobservice` | Async Job Service | `docker pull ghcr.io/dasomel/goharbor/harbor-jobservice:latest` |
+| `nginx-photon` | Reverse Proxy | `docker pull ghcr.io/dasomel/goharbor/nginx-photon:latest` |
+| `redis-photon` | Redis Cache | `docker pull ghcr.io/dasomel/goharbor/redis-photon:latest` |
+| `harbor-log` | Log Collector | `docker pull ghcr.io/dasomel/goharbor/harbor-log:latest` |
+| `harbor-exporter` | Metrics Exporter | `docker pull ghcr.io/dasomel/goharbor/harbor-exporter:latest` |
+| `harbor-prepare` | Configuration Generator | `docker pull ghcr.io/dasomel/goharbor/harbor-prepare:latest` |
+| `trivy-adapter-photon` | Trivy Security Scanner | `docker pull ghcr.io/dasomel/goharbor/trivy-adapter-photon:latest` |
 
 ### Usage
 
 ```bash
 # Pull a specific version
-docker pull ghcr.io/dasomel/harbor-core:v2.15.0
+docker pull ghcr.io/dasomel/goharbor/harbor-core:v2.15.0-build.XX
 
 # Or use latest
-docker pull ghcr.io/dasomel/harbor-core:latest
+docker pull ghcr.io/dasomel/goharbor/harbor-core:latest
 ```
 
 ### License
