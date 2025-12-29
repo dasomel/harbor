@@ -125,13 +125,9 @@ jobs:
              if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "^${source_image}$"; then
                echo "Pushing ${image_name}..."
                
-               # Tag with version
+               # Tag with version only (latest is managed by build-arm64.yml for multi-arch)
                docker tag $source_image ${ghcr_base}:${Harbor_Assets_Version}
                docker push ${ghcr_base}:${Harbor_Assets_Version}
-               
-               # Tag with latest
-               docker tag $source_image ${ghcr_base}:latest
-               docker push ${ghcr_base}:latest
                
                pushed_images="${pushed_images} ${image_name}"
              else
