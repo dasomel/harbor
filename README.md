@@ -12,41 +12,44 @@
 
 ---
 
-## 🚀 This Fork - Multi-Architecture Harbor Images
+## 🚀 This Fork - Multi-Architecture & Secure Harbor Images
 
-This is a fork of the official [goharbor/harbor](https://github.com/goharbor/harbor) repository that provides:
+This is a specialized fork of the official [goharbor/harbor](https://github.com/goharbor/harbor) repository. It focuses on providing **highly secure**, **fully automated**, and **multi-platform** container images.
 
-- **Multi-architecture container images** (AMD64 + ARM64)
-- **Pre-built images on GitHub Container Registry (ghcr.io)**
-- **Automated builds via GitHub Actions**
+### Key Enhancements
+
+- **🔄 Automated Upstream Sync**: Synchronizes daily with the official `goharbor/harbor` repository to ensure you always have the latest features and security patches.
+- **📱 Multi-Architecture Support**: Native support for both **AMD64 (x86_64)** and **ARM64 (aarch64)**.
+- **🛡️ Enhanced Supply Chain Security**:
+  - **SBOM (Software Bill of Materials)**: Every image includes an SPDX SBOM for full transparency of included packages.
+  - **SLSA Provenance**: Build attestations provided to prove the origin and build process of each image.
+  - **Cosign Signing**: All images are digitally signed using [Sigstore Cosign](https://github.com/sigstore/cosign) with OIDC keyless signing.
+- **📦 Reliable Hosting**: Pre-built images are hosted on **GitHub Container Registry (ghcr.io)** for high availability.
 
 ### Available Images
 
-All images are available at `ghcr.io/dasomel/goharbor/` and are compatible with the official Harbor Helm chart:
+All images are available at `ghcr.io/dasomel/goharbor/` and are fully compatible with the official Harbor Helm chart:
 
-| Image | Description | Pull Command |
-| ----- | ----------- | ------------ |
-| `harbor-core` | Harbor Core Service | `docker pull ghcr.io/dasomel/goharbor/harbor-core:latest` |
-| `harbor-portal` | Harbor Web UI | `docker pull ghcr.io/dasomel/goharbor/harbor-portal:latest` |
-| `harbor-db` | PostgreSQL Database | `docker pull ghcr.io/dasomel/goharbor/harbor-db:latest` |
-| `registry-photon` | Docker Registry | `docker pull ghcr.io/dasomel/goharbor/registry-photon:latest` |
-| `harbor-registryctl` | Registry Controller | `docker pull ghcr.io/dasomel/goharbor/harbor-registryctl:latest` |
-| `harbor-jobservice` | Async Job Service | `docker pull ghcr.io/dasomel/goharbor/harbor-jobservice:latest` |
-| `nginx-photon` | Reverse Proxy | `docker pull ghcr.io/dasomel/goharbor/nginx-photon:latest` |
-| `redis-photon` | Redis Cache | `docker pull ghcr.io/dasomel/goharbor/redis-photon:latest` |
-| `harbor-log` | Log Collector | `docker pull ghcr.io/dasomel/goharbor/harbor-log:latest` |
-| `harbor-exporter` | Metrics Exporter | `docker pull ghcr.io/dasomel/goharbor/harbor-exporter:latest` |
-| `harbor-prepare` | Configuration Generator | `docker pull ghcr.io/dasomel/goharbor/harbor-prepare:latest` |
-| `trivy-adapter-photon` | Trivy Security Scanner | `docker pull ghcr.io/dasomel/goharbor/trivy-adapter-photon:latest` |
+| Image | Description | Architecture | Security |
+| ----- | ----------- | ------------ | -------- |
+| `harbor-core` | Core Service | `amd64`, `arm64` | Signed, SBOM, SLSA |
+| `harbor-portal` | Web UI | `amd64`, `arm64` | Signed, SBOM, SLSA |
+| `harbor-db` | Database (PG) | `amd64`, `arm64` | Signed, SBOM, SLSA |
+| `harbor-jobservice` | Job Service | `amd64`, `arm64` | Signed, SBOM, SLSA |
+| `harbor-registryctl` | Registry CTL | `amd64`, `arm64` | Signed, SBOM, SLSA |
+| `trivy-adapter-photon`| Security Scanner| `amd64`, `arm64` | Signed, SBOM, SLSA |
+| ...and more | All components | `amd64`, `arm64` | Signed, SBOM, SLSA |
 
-### Usage
+### Quick Start
 
 ```bash
-# Pull a specific version
-docker pull ghcr.io/dasomel/goharbor/harbor-core:v2.15.0-build.XX
-
-# Or use latest
+# Pull the latest multi-arch core image
 docker pull ghcr.io/dasomel/goharbor/harbor-core:latest
+
+# Verify image signature (optional)
+cosign verify ghcr.io/dasomel/goharbor/harbor-core:latest \
+  --certificate-identity-regexp="https://github.com/dasomel/harbor" \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
 ```
 
 ### License
