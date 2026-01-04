@@ -6,8 +6,9 @@ on:
   repository_dispatch:
     types:
       - manual-trigger-conformance
-  schedule:
-    - cron: '0 6 * * *'
+  # Disabled: No self-hosted runner available
+  # schedule:
+  #   - cron: '0 6 * * *'
 
 jobs:
   CONFORMANCE_TEST:
