@@ -7,6 +7,8 @@ on:
     branches:
       - main
       - release-*
+  workflow_dispatch:
+
 
 jobs:
   # ========================================
@@ -173,25 +175,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set component description
-        id: desc
+      - name: Set component info
+        id: info
         run: |
           case "${{ matrix.component }}" in
-            core) DESC="Harbor Core service - handles API, authentication, and business logic" ;;
-            db) DESC="Harbor Database - PostgreSQL database for Harbor metadata" ;;
-            exporter) DESC="Harbor Exporter - Prometheus metrics exporter for Harbor" ;;
-            jobservice) DESC="Harbor Job Service - handles async tasks like replication and scanning" ;;
-            log) DESC="Harbor Log Collector - centralized logging service" ;;
-            nginx) DESC="Harbor Nginx - reverse proxy and load balancer" ;;
-            portal) DESC="Harbor Portal - web UI for Harbor registry" ;;
-            prepare) DESC="Harbor Prepare - configuration preparation tool" ;;
-            redis) DESC="Harbor Redis - cache and session storage" ;;
-            registry) DESC="Harbor Registry - Docker distribution registry" ;;
-            registryctl) DESC="Harbor Registry Controller - registry management service" ;;
-            trivy-adapter) DESC="Harbor Trivy Adapter - vulnerability scanning with Trivy" ;;
-            *) DESC="Harbor component" ;;
+            core) DESC="Harbor Core service"; NAME="harbor-core" ;;
+            db) DESC="Harbor Database"; NAME="harbor-db" ;;
+            exporter) DESC="Harbor Exporter"; NAME="harbor-exporter" ;;
+            jobservice) DESC="Harbor Job Service"; NAME="harbor-jobservice" ;;
+            log) DESC="Harbor Log Collector"; NAME="harbor-log" ;;
+            nginx) DESC="Harbor Nginx"; NAME="nginx-photon" ;;
+            portal) DESC="Harbor Portal"; NAME="harbor-portal" ;;
+            prepare) DESC="Harbor Prepare"; NAME="harbor-prepare" ;;
+            redis) DESC="Harbor Redis"; NAME="redis-photon" ;;
+            registry) DESC="Harbor Registry"; NAME="registry-photon" ;;
+            registryctl) DESC="Harbor Registry Controller"; NAME="harbor-registryctl" ;;
+            trivy-adapter) DESC="Harbor Trivy Adapter"; NAME="trivy-adapter-photon" ;;
+            *) DESC="Harbor component"; NAME="harbor-${{ matrix.component }}" ;;
           esac
           echo "description=${DESC}" >> $GITHUB_OUTPUT
+          echo "image_name=${NAME}" >> $GITHUB_OUTPUT
 
       - name: Build and push base image
         uses: docker/build-push-action@v6
@@ -201,13 +204,13 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/dasomel/goharbor/harbor-${{ matrix.component }}-base:${{ needs.BUILD_PACKAGE.outputs.version_tag }}
-            ghcr.io/dasomel/goharbor/harbor-${{ matrix.component }}-base:latest
+            ghcr.io/dasomel/goharbor/${{ steps.info.outputs.image_name }}-base:${{ needs.BUILD_PACKAGE.outputs.version_tag }}
+            ghcr.io/dasomel/goharbor/${{ steps.info.outputs.image_name }}-base:latest
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.title=Harbor ${{ matrix.component }} Base Image
-            org.opencontainers.image.description=${{ steps.desc.outputs.description }} (Base Image)
+            org.opencontainers.image.description=${{ steps.info.outputs.description }} (Base Image)
             org.opencontainers.image.vendor=Harbor
             org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.version=${{ needs.BUILD_PACKAGE.outputs.version_tag }}
@@ -221,8 +224,8 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
-          cosign sign --yes ghcr.io/dasomel/goharbor/harbor-${{ matrix.component }}-base:${{ needs.BUILD_PACKAGE.outputs.version_tag }}
-          cosign sign --yes ghcr.io/dasomel/goharbor/harbor-${{ matrix.component }}-base:latest
+          cosign sign --yes ghcr.io/dasomel/goharbor/${{ steps.info.outputs.image_name }}-base:${{ needs.BUILD_PACKAGE.outputs.version_tag }}
+          cosign sign --yes ghcr.io/dasomel/goharbor/${{ steps.info.outputs.image_name }}-base:latest
 
   # ========================================
   # 3단계: 바이너리 컴파일 (AMD64 + ARM64)
@@ -544,25 +547,26 @@ jobs:
           TRIVY_ADAPTER_VERSION: ${{ env.TRIVY_ADAPTER_VERSION }}
           EOF
 
-      - name: Set component description
-        id: desc
+      - name: Set component info
+        id: info
         run: |
           case "${{ matrix.component }}" in
-            core) DESC="Harbor Core service - handles API, authentication, and business logic" ;;
-            db) DESC="Harbor Database - PostgreSQL database for Harbor metadata" ;;
-            exporter) DESC="Harbor Exporter - Prometheus metrics exporter for Harbor" ;;
-            jobservice) DESC="Harbor Job Service - handles async tasks like replication and scanning" ;;
-            log) DESC="Harbor Log Collector - centralized logging service" ;;
-            nginx) DESC="Harbor Nginx - reverse proxy and load balancer" ;;
-            portal) DESC="Harbor Portal - web UI for Harbor registry" ;;
-            prepare) DESC="Harbor Prepare - configuration preparation tool" ;;
-            redis) DESC="Harbor Redis - cache and session storage" ;;
-            registry) DESC="Harbor Registry - Docker distribution registry" ;;
-            registryctl) DESC="Harbor Registry Controller - registry management service" ;;
-            trivy-adapter) DESC="Harbor Trivy Adapter - vulnerability scanning with Trivy" ;;
-            *) DESC="Harbor component" ;;
+            core) DESC="Harbor Core service"; NAME="harbor-core" ;;
+            db) DESC="Harbor Database"; NAME="harbor-db" ;;
+            exporter) DESC="Harbor Exporter"; NAME="harbor-exporter" ;;
+            jobservice) DESC="Harbor Job Service"; NAME="harbor-jobservice" ;;
+            log) DESC="Harbor Log Collector"; NAME="harbor-log" ;;
+            nginx) DESC="Harbor Nginx"; NAME="nginx-photon" ;;
+            portal) DESC="Harbor Portal"; NAME="harbor-portal" ;;
+            prepare) DESC="Harbor Prepare"; NAME="harbor-prepare" ;;
+            redis) DESC="Harbor Redis"; NAME="redis-photon" ;;
+            registry) DESC="Harbor Registry"; NAME="registry-photon" ;;
+            registryctl) DESC="Harbor Registry Controller"; NAME="harbor-registryctl" ;;
+            trivy-adapter) DESC="Harbor Trivy Adapter"; NAME="trivy-adapter-photon" ;;
+            *) DESC="Harbor component"; NAME="harbor-${{ matrix.component }}" ;;
           esac
           echo "description=${DESC}" >> $GITHUB_OUTPUT
+          echo "image_name=${NAME}" >> $GITHUB_OUTPUT
 
       - name: Build and push final image
         uses: docker/build-push-action@v6
@@ -577,13 +581,13 @@ jobs:
             NODE=node:16.18.0
             npm_registry=https://registry.npmjs.org
           tags: |
-            ghcr.io/dasomel/goharbor/harbor-${{ matrix.component }}:${{ needs.BUILD_PACKAGE.outputs.version_tag }}
-            ghcr.io/dasomel/goharbor/harbor-${{ matrix.component }}:latest
+            ghcr.io/dasomel/goharbor/${{ steps.info.outputs.image_name }}:${{ needs.BUILD_PACKAGE.outputs.version_tag }}
+            ghcr.io/dasomel/goharbor/${{ steps.info.outputs.image_name }}:latest
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.title=Harbor ${{ matrix.component }}
-            org.opencontainers.image.description=${{ steps.desc.outputs.description }}
+            org.opencontainers.image.description=${{ steps.info.outputs.description }}
             org.opencontainers.image.vendor=Harbor
             org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.version=${{ needs.BUILD_PACKAGE.outputs.version_tag }}
@@ -597,8 +601,8 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
-          cosign sign --yes ghcr.io/dasomel/goharbor/harbor-${{ matrix.component }}:${{ needs.BUILD_PACKAGE.outputs.version_tag }}
-          cosign sign --yes ghcr.io/dasomel/goharbor/harbor-${{ matrix.component }}:latest
+          cosign sign --yes ghcr.io/dasomel/goharbor/${{ steps.info.outputs.image_name }}:${{ needs.BUILD_PACKAGE.outputs.version_tag }}
+          cosign sign --yes ghcr.io/dasomel/goharbor/${{ steps.info.outputs.image_name }}:latest
 
   # ========================================
   # 8단계: 패키지 공개 설정 및 요약
@@ -619,15 +623,15 @@ jobs:
 
       - name: Set packages to public
         run: |
-          COMPONENTS="core db exporter jobservice log nginx portal prepare redis registry registryctl trivy-adapter"
+          COMPONENTS="harbor-core harbor-db harbor-exporter harbor-jobservice harbor-log nginx-photon harbor-portal harbor-prepare redis-photon registry-photon harbor-registryctl trivy-adapter-photon"
           for pkg in $COMPONENTS; do
-            echo "Setting goharbor/harbor-${pkg} to public..."
+            echo "Setting goharbor/${pkg} to public..."
             curl -s -X PATCH \
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/user/packages/container/goharbor%2Fharbor-${pkg}" \
-              -d '{"visibility":"public"}' || echo "Failed to set harbor-${pkg} to public"
+              "https://api.github.com/user/packages/container/goharbor%2F${pkg}" \
+              -d '{"visibility":"public"}' || echo "Failed to set ${pkg} to public"
           done
 
       - name: Generate summary
@@ -653,5 +657,13 @@ jobs:
           echo "| Component | Image |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
           for comp in core db exporter jobservice log nginx portal prepare redis registry registryctl trivy-adapter; do
-            echo "| ${comp} | \`ghcr.io/dasomel/goharbor/harbor-${comp}:${TAG}\` |" >> $GITHUB_STEP_SUMMARY
+            case "${comp}" in
+              nginx) NAME="nginx-photon" ;;
+              registry) NAME="registry-photon" ;;
+              redis) NAME="redis-photon" ;;
+              trivy-adapter) NAME="trivy-adapter-photon" ;;
+              prepare) NAME="harbor-prepare" ;;
+              *) NAME="harbor-${comp}" ;;
+            esac
+            echo "| ${comp} | \`ghcr.io/dasomel/goharbor/${NAME}:${TAG}\` |" >> $GITHUB_STEP_SUMMARY
           done
