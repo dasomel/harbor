@@ -204,8 +204,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/dasomel/goharbor/${{ steps.info.outputs.image_name }}-base:${{ needs.BUILD_PACKAGE.outputs.version_tag }}
-            ghcr.io/dasomel/goharbor/${{ steps.info.outputs.image_name }}-base:latest
+            ghcr.io/dasomel/goharbor/harbor-${{ matrix.component }}-base:${{ needs.BUILD_PACKAGE.outputs.version_tag }}
+            ghcr.io/dasomel/goharbor/harbor-${{ matrix.component }}-base:latest
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -224,8 +224,8 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
-          cosign sign --yes ghcr.io/dasomel/goharbor/${{ steps.info.outputs.image_name }}-base:${{ needs.BUILD_PACKAGE.outputs.version_tag }}
-          cosign sign --yes ghcr.io/dasomel/goharbor/${{ steps.info.outputs.image_name }}-base:latest
+          cosign sign --yes ghcr.io/dasomel/goharbor/harbor-${{ matrix.component }}-base:${{ needs.BUILD_PACKAGE.outputs.version_tag }}
+          cosign sign --yes ghcr.io/dasomel/goharbor/harbor-${{ matrix.component }}-base:latest
 
   # ========================================
   # 3단계: 바이너리 컴파일 (AMD64 + ARM64)
