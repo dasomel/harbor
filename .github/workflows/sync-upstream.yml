@@ -26,13 +26,43 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          # 원본의 main 브랜치를 현재 저장소의 main으로 머지
-          # --no-edit을 사용하여 자동 메시지 사용
-          # 만약 충돌이 발생하면 이 단계에서 실패하며 알림이 감
+          # Fork-specific 파일 목록 (충돌 시 우리 버전 유지)
+          FORK_SPECIFIC_FILES=(
+            ".github/workflows/build-package.yml"
+            ".github/workflows/sync-upstream.yml"
+            ".github/workflows/conformance_test.yml"
+            ".github/workflows/CI.yml"
+            ".github/workflows/publish_release.yml"
+            "README.md"
+          )
+
+          # 원본의 main 브랜치를 현재 저장소의 main으로 머지 시도
           if git merge upstream/main --no-edit; then
             echo "Successfully merged upstream changes."
             git push origin main
           else
-            echo "Conflict detected! Manual resolution required."
-            exit 1
+            echo "Merge conflict detected. Resolving fork-specific files..."
+
+            # Fork-specific 파일들에 대해 우리 버전 유지
+            for file in "${FORK_SPECIFIC_FILES[@]}"; do
+              if git diff --name-only --diff-filter=U | grep -q "^${file}$"; then
+                echo "Keeping our version of: ${file}"
+                git checkout --ours "${file}"
+                git add "${file}"
+              fi
+            done
+
+            # 아직 해결되지 않은 충돌이 있는지 확인
+            REMAINING_CONFLICTS=$(git diff --name-only --diff-filter=U || true)
+            if [ -n "$REMAINING_CONFLICTS" ]; then
+              echo "Unresolved conflicts in non-fork-specific files:"
+              echo "$REMAINING_CONFLICTS"
+              echo "Manual resolution required."
+              exit 1
+            fi
+
+            # 모든 충돌이 해결되었으면 커밋하고 푸시
+            git commit -m "Merge upstream/main with fork-specific files preserved"
+            git push origin main
+            echo "Successfully merged with fork-specific files preserved."
           fi
