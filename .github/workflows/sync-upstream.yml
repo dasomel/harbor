@@ -30,6 +30,7 @@ jobs:
             git remote add upstream https://github.com/goharbor/harbor.git
           fi
           git fetch upstream
+          git fetch upstream --tags
 
           # 사용자 이름과 이메일 설정 (머지를 위해 필요)
           git config --global user.name "github-actions[bot]"
@@ -49,6 +50,8 @@ jobs:
           if git merge upstream/main --no-edit; then
             echo "Successfully merged upstream changes."
             git push origin main
+            git push origin --tags
+            echo "Pushed main branch and tags to origin."
           else
             echo "Merge conflict detected. Resolving fork-specific files..."
 
@@ -73,5 +76,6 @@ jobs:
             # 모든 충돌이 해결되었으면 커밋하고 푸시
             git commit -m "Merge upstream/main with fork-specific files preserved"
             git push origin main
-            echo "Successfully merged with fork-specific files preserved."
+            git push origin --tags
+            echo "Successfully merged with fork-specific files preserved and pushed tags."
           fi

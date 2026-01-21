@@ -4,9 +4,8 @@ env:
 
 on:
   push:
-    branches:
-      - main
-      - release-*
+    tags:
+      - 'v*'  # v2.15.0, v2.16.0 등 버전 태그에만 반응
   workflow_dispatch:
 
 
