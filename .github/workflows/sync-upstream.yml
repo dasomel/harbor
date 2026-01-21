@@ -14,12 +14,21 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Sync Upstream
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          # 원본 저장소 등록
-          git remote add upstream https://github.com/goharbor/harbor.git
+          # Git remote URL을 PAT로 설정 (workflow 파일 push를 위해 필수)
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+
+          # 원본 저장소 등록 (이미 있으면 업데이트)
+          if git remote | grep -q '^upstream$'; then
+            git remote set-url upstream https://github.com/goharbor/harbor.git
+          else
+            git remote add upstream https://github.com/goharbor/harbor.git
+          fi
           git fetch upstream
 
           # 사용자 이름과 이메일 설정 (머지를 위해 필요)
