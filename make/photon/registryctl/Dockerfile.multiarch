@@ -9,18 +9,22 @@ FROM ${harbor_base_namespace}/harbor-registryctl-base:${harbor_base_image_versio
 # Re-declare ARG after FROM
 ARG TARGETARCH
 
-COPY ./make/photon/common/install_cert.sh /harbor/
-COPY ./make/photon/registryctl/start.sh /harbor/
+# Copy common scripts to /home/harbor/ (same as original Dockerfile)
+COPY ./make/photon/common/install_cert.sh /home/harbor/install_cert.sh
+COPY ./make/photon/registryctl/start.sh /home/harbor/start.sh
 
-# Copy architecture-specific binary
-COPY ./make/photon/registryctl/binary/${TARGETARCH}/harbor_registryctl /harbor/harbor_registryctl
+# Copy architecture-specific binaries
+COPY ./make/photon/registryctl/binary/${TARGETARCH}/harbor_registryctl /home/harbor/harbor_registryctl
 
 RUN chown -R harbor:harbor /etc/pki/tls/certs \
-    && chown -R harbor:harbor /harbor/ \
-    && chmod u+x /harbor/start.sh \
-    && chmod u+x /harbor/install_cert.sh \
-    && chmod u+x /harbor/harbor_registryctl
+    && chown harbor:harbor /home/harbor/harbor_registryctl && chmod u+x /home/harbor/harbor_registryctl \
+    && chown harbor:harbor /home/harbor/start.sh && chmod u+x /home/harbor/start.sh \
+    && chown harbor:harbor /home/harbor/install_cert.sh && chmod u+x /home/harbor/install_cert.sh
 
-WORKDIR /harbor/
+HEALTHCHECK CMD curl --fail -s http://localhost:8080/api/health || curl -sk --fail --key /etc/harbor/ssl/registryctl.key --cert /etc/harbor/ssl/registryctl.crt https://localhost:8443/api/health || exit 1
+
+VOLUME ["/var/lib/registry"]
+
+ENTRYPOINT ["/home/harbor/start.sh"]
+
 USER harbor
-ENTRYPOINT ["/harbor/start.sh"]
