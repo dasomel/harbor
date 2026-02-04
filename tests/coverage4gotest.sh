@@ -32,11 +32,6 @@ do
 	listDeps $package
 
 #    echo "DEBUG: testing package $package"
-	echo go test -v -cover -coverprofile=profile.tmp -coverpkg "$deps" $package
-	go test -v -cover -coverprofile=profile.tmp -coverpkg "$deps" $package
-	if [ -f profile.tmp ]	
-	then
-		cat profile.tmp | tail -n +2 >> "$profile_path"
-		rm profile.tmp
-	fi	
+	echo go test -v $package
+	go test -v $package	
 done
