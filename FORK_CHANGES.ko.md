@@ -6,6 +6,14 @@
 
 ---
 
+## 2026-02-04
+
+### Fixed
+- GitHub Actions runner에서 `covdata` 도구 부재로 인한 UTTEST 실패 수정 (`82b9258`)
+  - Go 1.20+에서 `-cover` 플래그 사용 시 필요한 covdata 도구가 runner에 없음
+  - coverage 프로파일링 비활성화로 해결
+  - Go 버전을 1.25.6으로 업그레이드 (go.mod 요구사항 충족)
+
 ## 2026-01-31
 
 ### Fixed
