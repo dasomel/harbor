@@ -13,6 +13,7 @@
   - Go 1.20+에서 `-cover` 플래그 사용 시 필요한 covdata 도구가 runner에 없음
   - coverage 프로파일링 비활성화로 해결
   - Go 버전을 1.25.6으로 업그레이드 (go.mod 요구사항 충족)
+- UI_UT 테스트 실패 수정 - upstream과 package-lock.json 동기화 (`558df84`)
 
 ## 2026-01-31
 
