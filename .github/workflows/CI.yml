@@ -45,7 +45,6 @@ jobs:
   UTTEST:
     env:
       UTTEST: true
-      GOEXPERIMENT: nocoverageredesign
     runs-on: ubuntu-latest
     timeout-minutes: 100
     steps:
