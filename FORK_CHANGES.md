@@ -6,6 +6,12 @@ This document records changes made after forking from [goharbor/harbor](https://
 
 ---
 
+## 2026-02-12
+
+### Fixed (via upstream sync)
+- CI UTTEST lint failure: `controller/event/handler/util/` added to revive var-naming exclusion in `.golangci.yaml` (upstream `2191aaac5`)
+- CI APITEST_DB failure: Security Hub test CVE sorting fix - `float()` cast and descending order (upstream `1006a2010`)
+
 ## 2026-01-31
 
 ### Fixed

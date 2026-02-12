@@ -6,6 +6,12 @@
 
 ---
 
+## 2026-02-12
+
+### Fixed (upstream sync로 해결)
+- CI UTTEST lint 실패: `.golangci.yaml`에서 revive var-naming 제외 경로에 `controller/event/handler/util/` 추가 (upstream `2191aaac5`)
+- CI APITEST_DB 실패: Security Hub 테스트 CVE 정렬 수정 - `float()` 캐스팅 및 내림차순 정렬 (upstream `1006a2010`)
+
 ## 2026-02-04
 
 ### Fixed
