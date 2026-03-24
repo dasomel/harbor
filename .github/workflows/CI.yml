@@ -105,6 +105,8 @@ jobs:
   APITEST_DB:
     env:
       APITEST_DB: true
+      DOCKER_USER: ${{ secrets.DOCKER_USER }}
+      DOCKER_PWD: ${{ secrets.DOCKER_PWD }}
     runs-on: ubuntu-latest
     timeout-minutes: 100
     steps:
@@ -159,11 +161,13 @@ jobs:
         if: always()
         with:
           name: db-api-harbor-logs.tar.gz
-          path: /home/ubuntu/_work/harbor/harbor/src/github.com/goharbor/harbor/integration_logs.tar.gz
+          path: ${{ github.workspace }}/src/github.com/goharbor/harbor/integration_logs.tar.gz
           retention-days: 5
   APITEST_DB_PROXY_CACHE:
     env:
       APITEST_DB: true
+      DOCKER_USER: ${{ secrets.DOCKER_USER }}
+      DOCKER_PWD: ${{ secrets.DOCKER_PWD }}
     runs-on: ubuntu-latest
     timeout-minutes: 100
     steps:
@@ -218,7 +222,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: proxy-api-harbor-logs.tar.gz
-          path: /home/ubuntu/_work/harbor/harbor/src/github.com/goharbor/harbor/integration_logs.tar.gz
+          path: ${{ github.workspace }}/src/github.com/goharbor/harbor/integration_logs.tar.gz
           retention-days: 5
   APITEST_LDAP:
     env:
@@ -275,7 +279,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: ldap-api-harbor-logs.tar.gz
-          path: /home/ubuntu/_work/harbor/harbor/src/github.com/goharbor/harbor/integration_logs.tar.gz
+          path: ${{ github.workspace }}/src/github.com/goharbor/harbor/integration_logs.tar.gz
           retention-days: 5
   OFFLINE:
     env:
