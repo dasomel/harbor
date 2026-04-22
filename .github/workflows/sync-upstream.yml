@@ -43,6 +43,7 @@ jobs:
             ".github/workflows/CI.yml"
             ".github/workflows/publish_release.yml"
             "README.md"
+            "tests/ci/api_run.sh"
           )
 
           # 원본의 main 브랜치를 현재 저장소의 main으로 머지 시도
@@ -51,7 +52,7 @@ jobs:
             git push origin main
             echo "Pushed main branch to origin."
           else
-            echo "Merge conflict detected. Resolving fork-specific files..."
+            echo "Merge conflict detected. Resolving conflicts..."
 
             # Fork-specific 파일들에 대해 우리 버전 유지
             for file in "${FORK_SPECIFIC_FILES[@]}"; do
@@ -62,17 +63,20 @@ jobs:
               fi
             done
 
-            # 아직 해결되지 않은 충돌이 있는지 확인
-            REMAINING_CONFLICTS=$(git diff --name-only --diff-filter=U || true)
+            # 나머지 충돌 파일들은 upstream 버전으로 해결
+            REMAINING_CONFLICTS=$(git diff --name-only --diff-filter=U)
             if [ -n "$REMAINING_CONFLICTS" ]; then
-              echo "Unresolved conflicts in non-fork-specific files:"
+              echo "Accepting upstream version for remaining conflicts:"
               echo "$REMAINING_CONFLICTS"
-              echo "Manual resolution required."
-              exit 1
+              while IFS= read -r file; do
+                echo "Accepting upstream version of: ${file}"
+                git checkout --theirs "${file}"
+                git add "${file}"
+              done <<< "$REMAINING_CONFLICTS"
             fi
 
             # 모든 충돌이 해결되었으면 커밋하고 푸시
             git commit -m "Merge upstream/main with fork-specific files preserved"
             git push origin main
-            echo "Successfully merged with fork-specific files preserved."
+            echo "Successfully merged with conflicts resolved."
           fi
