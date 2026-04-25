@@ -227,6 +227,8 @@ jobs:
   APITEST_LDAP:
     env:
       APITEST_LDAP: true
+      DOCKER_USER: ${{ secrets.DOCKER_USER }}
+      DOCKER_PWD: ${{ secrets.DOCKER_PWD }}
     runs-on: ubuntu-latest
     timeout-minutes: 100
     steps:
@@ -261,6 +263,9 @@ jobs:
           curl -L https://github.com/docker/compose/releases/download/v${DOCKER_COMPOSE_VERSION}/docker-compose-`uname -s`-`uname -m` > docker-compose
           chmod +x docker-compose
           sudo mv docker-compose /usr/local/bin
+          if [ -n "${DOCKER_USER}" ] && [ -n "${DOCKER_PWD}" ]; then
+            echo "${DOCKER_PWD}" | docker login -u "${DOCKER_USER}" --password-stdin || true
+          fi
       - name: install
         run: |
           cd src/github.com/goharbor/harbor
