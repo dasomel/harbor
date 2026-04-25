@@ -65,15 +65,15 @@ jobs:
               fi
             done
 
-            # 나머지 충돌 파일들은 upstream 버전으로 해결
-            REMAINING_CONFLICTS=$(git diff --name-only --diff-filter=U)
+            # Fork-specific이 아닌 남은 충돌은 upstream 버전을 수용
+            REMAINING_CONFLICTS=$(git diff --name-only --diff-filter=U || true)
             if [ -n "$REMAINING_CONFLICTS" ]; then
-              echo "Accepting upstream version for remaining conflicts:"
+              echo "Accepting upstream version for non-fork-specific conflicts:"
               echo "$REMAINING_CONFLICTS"
               while IFS= read -r file; do
-                echo "Accepting upstream version of: ${file}"
-                git checkout --theirs "${file}"
-                git add "${file}"
+                [ -z "$file" ] && continue
+                git checkout --theirs "$file"
+                git add "$file"
               done <<< "$REMAINING_CONFLICTS"
             fi
 
