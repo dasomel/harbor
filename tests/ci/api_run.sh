@@ -20,7 +20,9 @@ set +e
 docker ps
 # run db auth api cases
 if [ "$1" = 'DB' ]; then
-    EXCLUDE_FLAGS="--exclude proxy_cache_from_harbor --exclude proxy_cache_from_dockerhub --exclude proxy_cache_from_jfrog"
+    # proxy_cache_* runs in the dedicated APITEST_DB_PROXY_CACHE job
+    # podman_pull_push requires podman-in-Docker which is unsupported on GitHub-hosted ubuntu-latest runners
+    EXCLUDE_FLAGS="--exclude proxy_cache_from_harbor --exclude proxy_cache_from_dockerhub --exclude proxy_cache_from_jfrog --exclude podman_pull_push"
     if [ -z "${DOCKER_USER}" ] || [ -z "${DOCKER_PWD}" ]; then
         echo "DOCKER_USER/DOCKER_PWD not set, excluding replic_dockerhub test"
         EXCLUDE_FLAGS="${EXCLUDE_FLAGS} --exclude replic_dockerhub"
