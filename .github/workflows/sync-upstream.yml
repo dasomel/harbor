@@ -43,6 +43,7 @@ jobs:
             ".github/workflows/CI.yml"
             ".github/workflows/publish_release.yml"
             "README.md"
+            "tests/ci/api_run.sh"
           )
 
           # 원본의 main 브랜치를 현재 저장소의 main으로 머지 시도
