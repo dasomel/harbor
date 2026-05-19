@@ -23,7 +23,8 @@ if [ "$1" = 'DB' ]; then
     # proxy_cache_* runs in the dedicated APITEST_DB_PROXY_CACHE job
     # podman_pull_push requires podman-in-Docker which is unsupported on GitHub-hosted ubuntu-latest runners
     # push_cnab uses cnab-to-oci which pulls from registry.goharbor.io/nightly (requires auth not available on GitHub-hosted runners)
-    EXCLUDE_FLAGS="--exclude proxy_cache_from_harbor --exclude proxy_cache_from_dockerhub --exclude proxy_cache_from_jfrog --exclude podman_pull_push --exclude push_cnab"
+    # security_hub scans notary-server-photon:v2.2.0 (heavy old image); Trivy exceeds the 150s scan timeout on 2-CPU runners
+    EXCLUDE_FLAGS="--exclude proxy_cache_from_harbor --exclude proxy_cache_from_dockerhub --exclude proxy_cache_from_jfrog --exclude podman_pull_push --exclude push_cnab --exclude security_hub"
     if [ -z "${DOCKER_USER}" ] || [ -z "${DOCKER_PWD}" ]; then
         echo "DOCKER_USER/DOCKER_PWD not set, excluding replic_dockerhub test"
         EXCLUDE_FLAGS="${EXCLUDE_FLAGS} --exclude replic_dockerhub"
