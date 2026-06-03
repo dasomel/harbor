@@ -58,11 +58,19 @@ then
     sed "s/# github_token: xxx/github_token: $GITHUB_TOKEN/" -i make/harbor.yml
 fi
 
+# Build prepare base image locally for linux/amd64; the upstream Docker Hub image
+# goharbor/harbor-prepare-base:dev is sometimes pushed as ARM64-only, which causes
+# "exec format error" on AMD64 GitHub-hosted runners.
+sudo docker build --platform linux/amd64 --no-cache \
+    -f make/photon/prepare/Dockerfile.base \
+    -t goharbor/harbor-prepare-base:dev .
 sudo make compile build prepare COMPILETAG=compile_golangimage GOBUILDTAGS="include_oss include_gcs" TRIVYFLAG=true EXPORTERFLAG=true GEN_TLS=true PULL_BASE_FROM_DOCKERHUB=false
 
 # set the debugging env
 echo "GC_TIME_WINDOW_HOURS=0" | sudo tee -a ./make/common/config/core/env
 echo "EXECUTION_STATUS_REFRESH_INTERVAL_SECONDS=5" | sudo tee -a ./make/common/config/core/env
+# Disable exporter metric cache in API tests
+printf '\nHARBOR_EXPORTER_CACHE_TIME=0\n' | sudo tee -a ./make/common/config/exporter/env
 sudo make start
 
 # waiting 5 minutes to start

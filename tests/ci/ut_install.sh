@@ -29,6 +29,12 @@ sudo rm -rf /data/*
 sudo -E env "PATH=$PATH" make go_check
 sudo ./tests/hostcfg.sh
 sudo ./tests/generateCerts.sh
+# Build prepare base image locally for linux/amd64; the upstream Docker Hub image
+# goharbor/harbor-prepare-base:dev is sometimes pushed as ARM64-only, which causes
+# "exec format error" on AMD64 GitHub-hosted runners.
+sudo docker build --platform linux/amd64 --no-cache \
+    -f make/photon/prepare/Dockerfile.base \
+    -t goharbor/harbor-prepare-base:dev .
 sudo make build -e BUILDTARGET="_build_db _build_registry _build_prepare" -e PULL_BASE_FROM_DOCKERHUB=false -e BUILDREG=true -e BUILDTRIVYADP=true
 docker run --rm -v /:/hostfs:z goharbor/prepare:dev gencert -p /etc/harbor/tls/internal
 sudo MAKEPATH=$(pwd)/make ./make/prepare
