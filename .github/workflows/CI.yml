@@ -163,67 +163,11 @@ jobs:
           name: db-api-harbor-logs.tar.gz
           path: ${{ github.workspace }}/src/github.com/goharbor/harbor/integration_logs.tar.gz
           retention-days: 5
-  APITEST_DB_PROXY_CACHE:
-    env:
-      APITEST_DB: true
-      DOCKER_USER: ${{ secrets.DOCKER_USER }}
-      DOCKER_PWD: ${{ secrets.DOCKER_PWD }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 100
-    steps:
-      - name: Set up Go 1.25
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.25.7
-        id: go
-      - uses: actions/checkout@v6
-        with:
-          path: src/github.com/goharbor/harbor
-      - name: setup env
-        run: |
-          cd src/github.com/goharbor/harbor
-          pwd
-          go env
-          echo "GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}" >> $GITHUB_ENV
-          echo "GOPATH=$(go env GOPATH):$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-          echo "TOKEN_PRIVATE_KEY_PATH=${GITHUB_WORKSPACE}/src/github.com/goharbor/harbor/tests/private_key.pem" >> $GITHUB_ENV
-          IP=`hostname -I | awk '{print $1}'`
-          echo "IP=$IP" >> $GITHUB_ENV
-        shell: bash
-      - name: before_install
-        run: |
-          set -x
-          cd src/github.com/goharbor/harbor
-          pwd
-          env
-          df -h
-          #sudo apt install -y xvfb
-          #xvfb-run ls
-          curl -L https://github.com/docker/compose/releases/download/v${DOCKER_COMPOSE_VERSION}/docker-compose-`uname -s`-`uname -m` > docker-compose
-          chmod +x docker-compose
-          sudo mv docker-compose /usr/local/bin
-      - name: install
-        run: |
-          cd src/github.com/goharbor/harbor
-          env
-          df -h
-          docker system prune -a -f
-          bash ./tests/showtime.sh ./tests/ci/api_common_install.sh $IP DB
-      - name: script
-        run: |
-          cd src/github.com/goharbor/harbor
-          echo IP: $IP
-          df -h
-          bash ./tests/showtime.sh ./tests/ci/api_run.sh PROXY_CACHE $IP
-          df -h
-      - name: upload_logs
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: proxy-api-harbor-logs.tar.gz
-          path: ${{ github.workspace }}/src/github.com/goharbor/harbor/integration_logs.tar.gz
-          retention-days: 5
+  # APITEST_DB_PROXY_CACHE was removed: its only test (proxy_cache_from_harbor)
+  # proxies images from registry.goharbor.io/nightly, which requires auth that is
+  # not available on GitHub-hosted runners — the same limitation that already
+  # excludes push_cnab and proxy_cache_from_dockerhub/jfrog in tests/ci/api_run.sh.
+  # The proxy-cache feature is still covered by Harbor's own nightly pipeline.
   APITEST_LDAP:
     env:
       APITEST_LDAP: true
