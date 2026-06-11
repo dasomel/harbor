@@ -9,14 +9,17 @@ RUN tdnf install -y shadow >> /dev/null \
 # postgresql14-server is only needed for pg14->pg15 migration; skip if unavailable in repo
 RUN tdnf install -y postgresql14-server >> /dev/null || true
 
-# postgresql15-server requires libxml2.so.2()(64bit) which is broken in Photon 5.0 RPM
-# repo metadata. Workaround: install other deps via tdnf, then use tdnf download + rpm --nodeps
-# to bypass the unsolvable dependency check for postgresql15-server.
-RUN tdnf install -y gzip libxml2 findutils bc >> /dev/null \
-    && cd /tmp \
-    && tdnf download postgresql15 postgresql15-server \
-    && rpm -ivh --nodeps postgresql15-*.rpm \
-    && rm -f postgresql15-*.rpm \
+# postgresql15-server requires libxml2.so.2()(64bit) but Photon 5.0 repo metadata does not
+# register this as a "provides" for libxml2 (packaging bug). Workaround: build a dummy RPM
+# that provides this capability so tdnf's solver can install postgresql15-server normally.
+RUN tdnf install -y gzip libxml2 findutils bc rpm-build >> /dev/null \
+    && mkdir -p /root/rpmbuild/{BUILD,BUILDROOT,RPMS,SPECS,SRPMS,SOURCES} \
+    && printf 'Name: libxml2-compat\nVersion: 1.0\nRelease: 1\nSummary: libxml2.so.2 compat\nLicense: MIT\nBuildArch: x86_64\nProvides: libxml2.so.2()(64bit)\n\n%%description\nDummy.\n\n%%build\n\n%%install\n\n%%files\n' \
+        > /root/rpmbuild/SPECS/libxml2-compat.spec \
+    && rpmbuild -bb /root/rpmbuild/SPECS/libxml2-compat.spec \
+    && rpm -ivh /root/rpmbuild/RPMS/x86_64/libxml2-compat-*.rpm \
+    && rm -rf /root/rpmbuild \
+    && tdnf install -y postgresql15-server >> /dev/null \
     && mkdir -p /docker-entrypoint-initdb.d \
     && mkdir -p /run/postgresql \
     && chown -R postgres:postgres /run/postgresql \
