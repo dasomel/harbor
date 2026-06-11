@@ -6,17 +6,22 @@ ENV PGDATA /var/lib/postgresql/data
 # containers the plugin's unshare(2) call fails ("Operation not permitted"),
 # which aborts any package scriptlet that forks (glibc-iconv/postgresql15-libs/
 # postgresql15-client %posttrans, toybox %preun, ...) and fails the whole rpm
-# transaction. Removing the %__transaction_unshare macro stops rpm from loading
-# the plugin, so scriptlets run normally without the namespace isolation that
-# can't work here. The macro may live in a vendor/platform macros file, so scan
-# every rpm macro file rather than a fixed list. This must run before any tdnf
-# install, since tdnf install itself triggers the failing scriptlets.
+# transaction. Neutralize it three ways so it cannot load regardless of how
+# Photon's rpm wires it up: (1) strip any %__transaction_unshare definition from
+# every macro file, (2) force the macro to nil in the highest-priority macro
+# files including ~/.rpmmacros (read last, so it overrides built-in/vendor
+# defaults), and (3) delete the unshare.so plugin itself. This must run before
+# any tdnf install, since tdnf install itself triggers the failing scriptlets.
 RUN find /usr/lib/rpm /etc/rpm -type f 2>/dev/null | while read -r f; do \
         if grep -q '__transaction_unshare' "$f" 2>/dev/null; then \
             sed -i '/__transaction_unshare/d' "$f"; \
         fi; \
     done; \
-    echo '%__transaction_unshare %{nil}' >> /usr/lib/rpm/macros; true
+    for m in /usr/lib/rpm/macros /etc/rpm/macros /root/.rpmmacros; do \
+        mkdir -p "$(dirname "$m")"; \
+        echo '%__transaction_unshare %{nil}' >> "$m"; \
+    done; \
+    find /usr/lib/rpm -name 'unshare.so' -exec rm -f {} + 2>/dev/null; true
 
 RUN tdnf install -y shadow >> /dev/null \
     && groupadd -r postgres --gid=999 \
