@@ -137,8 +137,17 @@ describe('RecentLogComponent (inline template)', () => {
     it('should support pagination', async () => {
         fixture.autoDetectChanges(true);
         await fixture.whenStable();
+        // Clarity's datagrid renders its pagination controls asynchronously after
+        // the log data resolves, so the '.pagination-next' button may not be in the
+        // DOM right after whenStable(). Poll a few change-detection cycles for it to
+        // avoid a flaky "Expected null to be truthy" failure.
         let el: HTMLButtonElement =
             fixture.nativeElement.querySelector('.pagination-next');
+        for (let i = 0; i < 20 && !el; i++) {
+            fixture.detectChanges();
+            await fixture.whenStable();
+            el = fixture.nativeElement.querySelector('.pagination-next');
+        }
         expect(el).toBeTruthy();
         el.click();
         fixture.detectChanges();
