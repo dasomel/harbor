@@ -4,11 +4,17 @@ ENV PGDATA /var/lib/postgresql/data
 
 # Disable rpm's "unshare" transaction plugin. In unprivileged Docker build
 # containers the plugin's unshare(2) call fails ("Operation not permitted"),
-# which aborts package scriptlets (postgresql15-client %posttrans, toybox
-# %preun, etc.). Removing the %__transaction_unshare macro keeps all scriptlets
-# running normally, just without the namespace isolation that can't work here.
-RUN for f in /usr/lib/rpm/macros /usr/lib/rpm/macros.d/* /usr/lib/rpm/platform/*/macros /etc/rpm/macros /etc/rpm/macros.*; do \
-        [ -f "$f" ] && sed -i '/__transaction_unshare/d' "$f"; \
+# which aborts any package scriptlet that forks (glibc-iconv/postgresql15-libs/
+# postgresql15-client %posttrans, toybox %preun, ...) and fails the whole rpm
+# transaction. Removing the %__transaction_unshare macro stops rpm from loading
+# the plugin, so scriptlets run normally without the namespace isolation that
+# can't work here. The macro may live in a vendor/platform macros file, so scan
+# every rpm macro file rather than a fixed list. This must run before any tdnf
+# install, since tdnf install itself triggers the failing scriptlets.
+RUN find /usr/lib/rpm /etc/rpm -type f 2>/dev/null | while read -r f; do \
+        if grep -q '__transaction_unshare' "$f" 2>/dev/null; then \
+            sed -i '/__transaction_unshare/d' "$f"; \
+        fi; \
     done; \
     echo '%__transaction_unshare %{nil}' >> /usr/lib/rpm/macros; true
 
