@@ -16,7 +16,7 @@ RUN tdnf install -y gzip libxml2 findutils bc rpm-build >> /dev/null \
     && mkdir -p /root/rpmbuild/{BUILD,BUILDROOT,RPMS,SPECS,SRPMS,SOURCES} \
     && printf 'Name: libxml2-compat\nVersion: 1.0\nRelease: 1\nSummary: libxml2.so.2 compat\nLicense: MIT\nBuildArch: x86_64\nProvides: libxml2.so.2()(64bit)\n\n%%description\nDummy.\n\n%%build\n\n%%install\n\n%%files\n' \
         > /root/rpmbuild/SPECS/libxml2-compat.spec \
-    && rpmbuild -bb /root/rpmbuild/SPECS/libxml2-compat.spec \
+    && rpmbuild -bb --define "_topdir /root/rpmbuild" /root/rpmbuild/SPECS/libxml2-compat.spec \
     && rpm -ivh /root/rpmbuild/RPMS/x86_64/libxml2-compat-*.rpm \
     && rm -rf /root/rpmbuild \
     && tdnf install -y postgresql15-server >> /dev/null \
