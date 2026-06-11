@@ -2,6 +2,16 @@ FROM photon:5.0
 
 ENV PGDATA /var/lib/postgresql/data
 
+# Disable rpm's "unshare" transaction plugin. In unprivileged Docker build
+# containers the plugin's unshare(2) call fails ("Operation not permitted"),
+# which aborts package scriptlets (postgresql15-client %posttrans, toybox
+# %preun, etc.). Removing the %__transaction_unshare macro keeps all scriptlets
+# running normally, just without the namespace isolation that can't work here.
+RUN for f in /usr/lib/rpm/macros /usr/lib/rpm/macros.d/* /usr/lib/rpm/platform/*/macros /etc/rpm/macros /etc/rpm/macros.*; do \
+        [ -f "$f" ] && sed -i '/__transaction_unshare/d' "$f"; \
+    done; \
+    echo '%__transaction_unshare %{nil}' >> /usr/lib/rpm/macros; true
+
 RUN tdnf install -y shadow >> /dev/null \
     && groupadd -r postgres --gid=999 \
     && useradd -m -r -g postgres --uid=999 postgres
@@ -20,7 +30,7 @@ RUN tdnf install -y gzip libxml2 findutils bc rpm-build >> /dev/null \
     && rpmbuild -bb --define "_topdir /root/rpmbuild" /root/rpmbuild/SPECS/libxml2-compat.spec \
     && rpm -ivh /root/rpmbuild/RPMS/x86_64/libxml2-compat-*.rpm \
     && rm -rf /root/rpmbuild \
-    && tdnf install -y --setopt=tsflags=noscripts postgresql15-server >> /dev/null \
+    && tdnf install -y postgresql15-server >> /dev/null \
     && mkdir -p /docker-entrypoint-initdb.d \
     && mkdir -p /run/postgresql \
     && chown -R postgres:postgres /run/postgresql \
@@ -30,4 +40,4 @@ RUN tdnf install -y gzip libxml2 findutils bc rpm-build >> /dev/null \
     && sed -i "s|#unix_socket_directories = '/tmp'.*|unix_socket_directories = '/run/postgresql'|g" /usr/pgsql/15/share/postgresql/postgresql.conf.sample \
     && tdnf clean all
 
-RUN tdnf erase -y --setopt=tsflags=noscripts toybox && tdnf install -y --setopt=tsflags=noscripts util-linux net-tools
+RUN tdnf erase -y toybox && tdnf install -y util-linux net-tools
