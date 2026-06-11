@@ -13,7 +13,7 @@ RUN tdnf install -y postgresql14-server >> /dev/null || true
 # that Photon 5.0 repo metadata omits from the libxml2 package (packaging bug). Workaround:
 # read the actual versioned symbol sets from the installed libxml2.so.2 via nm -D, then build
 # a dummy compat RPM that declares all of them so tdnf's solver can satisfy the requirements.
-RUN tdnf install -y gzip libxml2 findutils bc rpm-build >> /dev/null \
+RUN tdnf install -y gzip libxml2 findutils bc rpm-build binutils >> /dev/null \
     && mkdir -p /root/rpmbuild/{BUILD,BUILDROOT,RPMS,SPECS,SRPMS,SOURCES} \
     && { echo 'Name: libxml2-compat'; \
          echo 'Version: 1.0'; \
