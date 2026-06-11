@@ -30,4 +30,4 @@ RUN tdnf install -y gzip libxml2 findutils bc rpm-build >> /dev/null \
     && sed -i "s|#unix_socket_directories = '/tmp'.*|unix_socket_directories = '/run/postgresql'|g" /usr/pgsql/15/share/postgresql/postgresql.conf.sample \
     && tdnf clean all
 
-RUN tdnf erase -y toybox && tdnf install -y util-linux net-tools
+RUN tdnf erase -y --setopt=tsflags=noscripts toybox && tdnf install -y --setopt=tsflags=noscripts util-linux net-tools
