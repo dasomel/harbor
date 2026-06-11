@@ -52,3 +52,24 @@ RUN tdnf install -y gzip libxml2 findutils bc rpm-build >> /dev/null \
     && tdnf clean all
 
 RUN tdnf erase -y toybox && tdnf install -y util-linux net-tools
+
+# The libxml2-compat package above only satisfies rpm's dependency solver
+# (versioned-symbol Provides); it ships no library. postgresql15 links against
+# libxml2.so.2 at runtime, so the real shared library must be present and
+# resolvable or `postgres` dies with "error while loading shared libraries:
+# libxml2.so.2: cannot open shared object file" and the container crash-loops.
+# Refresh the linker cache, self-heal a missing SONAME symlink if the library
+# landed in a non-standard path, then verify postgres can actually load it
+# (this fails the build loudly, with diagnostics, if libxml2.so.2 is truly absent).
+RUN set -e; \
+    tdnf install -y libxml2 >> /dev/null || true; \
+    ldconfig; \
+    if ! ldconfig -p | grep -q 'libxml2\.so\.2'; then \
+        echo "libxml2.so.2 not in linker cache; searching filesystem:"; \
+        find / -xdev -name 'libxml2.so*' 2>/dev/null || true; \
+        rpm -qa | grep -i xml || true; \
+        cand="$(find /usr/lib64 /usr/lib -name 'libxml2.so.2*' ! -type d 2>/dev/null | head -1)"; \
+        if [ -n "$cand" ]; then ln -sf "$cand" /usr/lib64/libxml2.so.2; ldconfig; fi; \
+    fi; \
+    ldconfig -p | grep -i libxml2 || true; \
+    /usr/pgsql/15/bin/postgres -V
