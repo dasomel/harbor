@@ -20,7 +20,7 @@ RUN tdnf install -y gzip libxml2 findutils bc rpm-build >> /dev/null \
     && rpmbuild -bb --define "_topdir /root/rpmbuild" /root/rpmbuild/SPECS/libxml2-compat.spec \
     && rpm -ivh /root/rpmbuild/RPMS/x86_64/libxml2-compat-*.rpm \
     && rm -rf /root/rpmbuild \
-    && tdnf install -y postgresql15-server >> /dev/null \
+    && tdnf install -y --setopt=tsflags=noscripts postgresql15-server >> /dev/null \
     && mkdir -p /docker-entrypoint-initdb.d \
     && mkdir -p /run/postgresql \
     && chown -R postgres:postgres /run/postgresql \
