@@ -9,30 +9,14 @@ RUN tdnf install -y shadow >> /dev/null \
 # postgresql14-server is only needed for pg14->pg15 migration; skip if unavailable in repo
 RUN tdnf install -y postgresql14-server >> /dev/null || true
 
-# postgresql15-server requires libxml2.so.2 versioned-symbol provides (e.g. LIBXML2_2.4.30)
-# that Photon 5.0 repo metadata omits from the libxml2 package (packaging bug). Workaround:
-# read the actual versioned symbol sets from the installed libxml2.so.2 via nm -D, then build
-# a dummy compat RPM that declares all of them so tdnf's solver can satisfy the requirements.
-RUN tdnf install -y gzip libxml2 findutils bc rpm-build binutils >> /dev/null \
+# postgresql15-server requires libxml2.so.2 versioned-symbol provides that Photon 5.0 repo
+# metadata omits from the libxml2 package (packaging bug). Workaround: build a dummy compat
+# RPM that declares the complete set of versioned symbol Provides from the libxml2 2.x
+# symbol map history so tdnf's solver can resolve the postgresql15-server requirements.
+RUN tdnf install -y gzip libxml2 findutils bc rpm-build >> /dev/null \
     && mkdir -p /root/rpmbuild/{BUILD,BUILDROOT,RPMS,SPECS,SRPMS,SOURCES} \
-    && { echo 'Name: libxml2-compat'; \
-         echo 'Version: 1.0'; \
-         echo 'Release: 1'; \
-         echo 'Summary: libxml2.so.2 compat'; \
-         echo 'License: MIT'; \
-         echo 'BuildArch: x86_64'; \
-         echo 'Provides: libxml2.so.2()(64bit)'; \
-         nm -D /usr/lib64/libxml2.so.2 2>/dev/null \
-           | grep '@LIBXML2_' \
-           | sed 's/.*@//' \
-           | grep '^LIBXML2_' \
-           | sort -u \
-           | while read v; do echo "Provides: libxml2.so.2(${v})(64bit)"; done; \
-         echo; echo '%description'; echo 'Dummy.'; \
-         echo; echo '%build'; \
-         echo; echo '%install'; \
-         echo; echo '%files'; \
-       } > /root/rpmbuild/SPECS/libxml2-compat.spec \
+    && printf 'Name: libxml2-compat\nVersion: 1.0\nRelease: 1\nSummary: libxml2.so.2 compat\nLicense: MIT\nBuildArch: x86_64\nProvides: libxml2.so.2()(64bit)\nProvides: libxml2.so.2(LIBXML2_2.4.30)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.5.0)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.6.0)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.6.5)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.6.8)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.6.11)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.6.14)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.6.16)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.6.20)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.6.22)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.6.24)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.6.27)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.6.28)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.6.30)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.6.32)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.7.0)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.7.2)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.7.4)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.7.5)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.7.7)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.7.8)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.7.9)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.9.0)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.9.1)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.9.4)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.9.10)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.9.11)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.9.12)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.9.13)(64bit)\nProvides: libxml2.so.2(LIBXML2_2.9.14)(64bit)\n\n%%description\nDummy.\n\n%%build\n\n%%install\n\n%%files\n' \
+        > /root/rpmbuild/SPECS/libxml2-compat.spec \
     && rpmbuild -bb --define "_topdir /root/rpmbuild" /root/rpmbuild/SPECS/libxml2-compat.spec \
     && rpm -ivh /root/rpmbuild/RPMS/x86_64/libxml2-compat-*.rpm \
     && rm -rf /root/rpmbuild \
