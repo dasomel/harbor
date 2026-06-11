@@ -8,7 +8,8 @@ RUN tdnf install -y shadow >> /dev/null \
 
 # postgresql14-server is only needed for pg14->pg15 migration; skip if unavailable in repo
 RUN tdnf install -y postgresql14-server >> /dev/null || true
-RUN tdnf install -y gzip libxml2 postgresql15-server findutils bc >> /dev/null \
+RUN tdnf install -y libxml2 >> /dev/null
+RUN tdnf install -y gzip postgresql15-server findutils bc >> /dev/null \
     && mkdir -p /docker-entrypoint-initdb.d \
     && mkdir -p /run/postgresql \
     && chown -R postgres:postgres /run/postgresql \
