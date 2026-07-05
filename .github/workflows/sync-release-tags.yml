@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     env:
       MIN_GA_VERSION: v2.15.0
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run || 'false' }}
@@ -79,6 +80,13 @@ jobs:
             if git fetch upstream "refs/tags/${tag}:refs/tags/${tag}" \
                && git push origin "refs/tags/${tag}:refs/tags/${tag}"; then
               echo "- pushed: ${tag}" >> "$GITHUB_STEP_SUMMARY"
+              echo "Triggering build-package.yml for ${tag}..."
+              if gh workflow run build-package.yml --repo "${{ github.repository }}" --ref main -f release_tag="${tag}"; then
+                echo "  - triggered build-package.yml (release_tag=${tag})" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "  - FAILED to trigger build-package.yml for ${tag}" >> "$GITHUB_STEP_SUMMARY"
+                failed=1
+              fi
             else
               echo "- FAILED: ${tag}" >> "$GITHUB_STEP_SUMMARY"
               failed=1
