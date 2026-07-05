@@ -7,6 +7,12 @@ on:
     tags:
       - 'v*'  # v2.15.0, v2.16.0 등 버전 태그에만 반응
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "업스트림 GA 릴리즈 태그를 이 fork의 CI로 빌드할 때 지정 (예: v2.15.1). 비워두면 기존 workflow_dispatch 동작(build.N 태깅) 그대로."
+        required: false
+        type: string
+        default: ""
 
 
 jobs:
@@ -44,6 +50,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           path: src/github.com/goharbor/harbor
+          ref: ${{ inputs.release_tag || github.ref }}
       - name: Build Base Image
         if: |
           github.event_name == 'workflow_dispatch' ||
@@ -65,9 +72,19 @@ jobs:
 
           target_release_version=$(cat ./VERSION)
           target_branch="$(echo ${GITHUB_REF#refs/heads/})"
-          Harbor_Package_Version=$(compute_version_tag "${{ github.ref_type }}" "${{ github.ref_name }}" "$target_release_version" "$GITHUB_RUN_NUMBER")
+          release_tag="${{ inputs.release_tag }}"
 
-          if [[ $target_branch == "main" ]]; then
+          if [ -n "$release_tag" ]; then
+            ref_type_for_tag="tag"
+            ref_name_for_tag="$release_tag"
+          else
+            ref_type_for_tag="${{ github.ref_type }}"
+            ref_name_for_tag="${{ github.ref_name }}"
+          fi
+
+          Harbor_Package_Version=$(compute_version_tag "$ref_type_for_tag" "$ref_name_for_tag" "$target_release_version" "$GITHUB_RUN_NUMBER")
+
+          if [ -n "$release_tag" ] || [[ $target_branch == "main" ]]; then
             Harbor_Assets_Version=$Harbor_Package_Version
           else
             Harbor_Assets_Version=$target_release_version
@@ -167,6 +184,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -253,6 +272,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -343,6 +364,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -402,6 +425,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -449,6 +474,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -517,6 +544,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -682,7 +711,7 @@ jobs:
     needs:
       - BUILD_PACKAGE
       - build-final-images
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || inputs.release_tag != ''
     permissions:
       contents: write
 
@@ -692,9 +721,11 @@ jobs:
 
       - name: Fetch upstream release notes
         id: upstream_notes
+        env:
+          TAG_NAME: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
-          tag="${{ github.ref_name }}"
+          tag="$TAG_NAME"
           notes=$(curl -s \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/goharbor/harbor/releases/tags/${tag}" \
@@ -712,9 +743,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_NOTES: ${{ steps.upstream_notes.outputs.notes }}
+          TAG_NAME: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
-          tag="${{ github.ref_name }}"
+          tag="$TAG_NAME"
           if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             echo "Release $tag already exists, skipping."
             exit 0
