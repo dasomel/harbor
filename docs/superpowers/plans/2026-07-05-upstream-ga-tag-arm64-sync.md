@@ -1075,4 +1075,103 @@ already pushed, so the next day's sync saw nothing to do. Keying off
 'does a GitHub Release exist for this tag' instead makes a failed run
 self-healing — it gets retried on the next scheduled sync."
 ```
+
+---
+
+### Task 10: Fix `filter_ga_tags_min_version` aborting the workflow when its input has zero matches
+
+**Files:**
+- Modify: `tools/release/sync_release_tags.sh` (the `filter_ga_tags_min_version` function)
+- Modify: `tools/release/sync_release_tags.test.sh` (add a regression test that exercises the bug's actual failure mode)
+
+**Interfaces:** unchanged — same function signature/behavior contract (stdin in, filtered+sorted tags out), just no longer aborts the calling script when it legitimately produces zero output.
+
+**Why:** live end-to-end testing against the real repo (Task 8) found that `sync-release-tags.yml`'s first real dry-run failed immediately, with zero output, before printing anything. Root cause: `filter_ga_tags_min_version` pipes through `grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$'`, and `grep` exits with status `1` when it matches **zero** lines — this is standard, correct `grep` behavior, not an error. Under `set -euo pipefail`, that `1` becomes the whole pipeline's exit status (pipefail takes the rightmost non-zero), which then aborts the entire script via `set -e`. This function is called directly (not wrapped in `$(...)` command substitution) at `.github/workflows/sync-release-tags.yml`'s line computing `released_ga.txt` from `released_raw.txt` — and `released_raw.txt` is empty right now because this fork has zero GitHub Releases yet (a brand new, never-yet-successful sync), which is exactly the state that hits this bug. It will keep happening any time zero already-released GA tags exist, not just on the very first run.
+
+The existing unit test (`sync_release_tags.test.sh`) already covers "returns nothing when all tags are below the floor" but calls the function via `actual_empty=$(printf ... | filter_ga_tags_min_version ...)` — a **variable assignment**. Bash's `set -e` has a specific, easy-to-miss exemption: a failing command substitution on the right-hand side of a plain assignment does *not* trigger `-e` (only the assignment's own — always-successful — exit status is checked). That exemption is exactly why this bug passed unit testing, task review, and two whole-branch reviews undetected: every test and every reviewer's mental trace used the assignment form, which structurally cannot observe this class of bug. The new regression test below calls the function directly (matching how the real workflow calls it) specifically so this can't recur silently.
+
+- [ ] **Step 1: Write the failing regression test**
+
+Add to `tools/release/sync_release_tags.test.sh`, in the `filter_ga_tags_min_version` section (after the existing `actual_empty` assertion):
+
+```bash
+# Regression: a DIRECT call (not wrapped in `x=$(...)`) must not abort the
+# calling script under `set -e` when the input has zero GA matches — this
+# is exactly how sync-release-tags.yml invokes it, unlike the assignment
+# form above (which bash's set -e semantics exempt from failure detection
+# and so cannot catch this class of bug).
+direct_call_output_file=$(mktemp)
+if (set -euo pipefail; printf 'v2.14.0\nv2.14.5\n' | filter_ga_tags_min_version "v2.15.0" > "$direct_call_output_file"); then
+  direct_call_exit=0
+else
+  direct_call_exit=$?
+fi
+assert_eq "direct call (no assignment) exits 0 even when nothing matches" "0" "$direct_call_exit"
+assert_eq "direct call produces empty output when nothing matches" "" "$(cat "$direct_call_output_file")"
+rm -f "$direct_call_output_file"
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `bash tools/release/sync_release_tags.test.sh`
+Expected: FAIL — `direct call (no assignment) exits 0 even when nothing matches (expected '0', got '1')` (the subshell aborts via `set -e` before writing to `direct_call_output_file`, so `direct_call_exit` is `1`)
+
+- [ ] **Step 3: Fix `filter_ga_tags_min_version`**
+
+Replace:
+```bash
+filter_ga_tags_min_version() {
+  local min_version="$1"
+  grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+    | while IFS= read -r tag; do
+        if [ "$(printf '%s\n%s\n' "$min_version" "$tag" | sort -V | head -n1)" = "$min_version" ]; then
+          echo "$tag"
+        fi
+      done \
+    | sort -V
+}
+```
+with:
+```bash
+filter_ga_tags_min_version() {
+  local min_version="$1"
+  { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
+    | while IFS= read -r tag; do
+        if [ "$(printf '%s\n%s\n' "$min_version" "$tag" | sort -V | head -n1)" = "$min_version" ]; then
+          echo "$tag"
+        fi
+      done \
+    | sort -V
+}
+```
+(The `|| true` absorbs `grep`'s "zero matches" exit status of `1` right where it happens, so it can never become the pipeline's overall exit status under `pipefail`. A genuine `grep` usage error, distinct from "no matches", is not a case this function needs to distinguish — the function's whole contract is "filter and possibly find nothing.")
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `bash tools/release/sync_release_tags.test.sh`
+Expected: all assertions PASS (existing 4 plus the 2 new ones), exit code 0.
+
+- [ ] **Step 5: Re-verify against real, empty input exactly as the workflow uses it**
+
+Run:
+```bash
+source tools/release/sync_release_tags.sh
+(set -euo pipefail; printf '' | filter_ga_tags_min_version "v2.15.0"); echo "exit: $?"
+```
+Expected: `exit: 0` (empty output, printed nothing, but the subshell did not abort)
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add tools/release/sync_release_tags.sh tools/release/sync_release_tags.test.sh
+git commit -m "fix(ci): stop grep's zero-matches exit status from aborting filter_ga_tags_min_version
+
+grep exits 1 when it matches nothing — correct grep behavior, but fatal
+under this repo's set -euo pipefail workflows when the function is called
+directly (not wrapped in an assignment, which set -e otherwise exempts
+from failure detection). This is exactly what happened on the first live
+run of sync-release-tags.yml: this fork has zero GitHub Releases yet, so
+released_raw.txt was empty, grep matched nothing, and the whole step
+aborted before printing anything."
+```
 Expected: a release titled `v2.15.1 (linux/amd64, linux/arm64)` with body text mentioning it was mirrored from `goharbor/harbor`.
