@@ -1090,6 +1090,8 @@ self-healing — it gets retried on the next scheduled sync."
 
 The existing unit test (`sync_release_tags.test.sh`) already covers "returns nothing when all tags are below the floor" but calls the function via `actual_empty=$(printf ... | filter_ga_tags_min_version ...)` — a **variable assignment**. Bash's `set -e` has a specific, easy-to-miss exemption: a failing command substitution on the right-hand side of a plain assignment does *not* trigger `-e` (only the assignment's own — always-successful — exit status is checked). That exemption is exactly why this bug passed unit testing, task review, and two whole-branch reviews undetected: every test and every reviewer's mental trace used the assignment form, which structurally cannot observe this class of bug. The new regression test below calls the function directly (matching how the real workflow calls it) specifically so this can't recur silently.
 
+**Correction (post-implementation):** the test input below uses `printf ''` (genuinely empty stdin). An earlier draft of this step used `printf 'v2.14.0\nv2.14.5\n'` instead — that input does NOT reproduce the bug, since both strings match the GA regex and `grep` exits 0 for them; they only get filtered out afterward by the version-floor comparison inside the `while read` loop (which always exits 0 regardless of whether it echoes anything). Only genuinely zero grep matches exercise the actual failure mode. The implementer caught and fixed this during Task 10; the snippet below reflects the corrected version.
+
 - [ ] **Step 1: Write the failing regression test**
 
 Add to `tools/release/sync_release_tags.test.sh`, in the `filter_ga_tags_min_version` section (after the existing `actual_empty` assertion):
@@ -1101,7 +1103,7 @@ Add to `tools/release/sync_release_tags.test.sh`, in the `filter_ga_tags_min_ver
 # form above (which bash's set -e semantics exempt from failure detection
 # and so cannot catch this class of bug).
 direct_call_output_file=$(mktemp)
-if (set -euo pipefail; printf 'v2.14.0\nv2.14.5\n' | filter_ga_tags_min_version "v2.15.0" > "$direct_call_output_file"); then
+if (set -euo pipefail; printf '' | filter_ga_tags_min_version "v2.15.0" > "$direct_call_output_file"); then
   direct_call_exit=0
 else
   direct_call_exit=$?
