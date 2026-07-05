@@ -80,6 +80,24 @@ jobs:
             if git fetch upstream "refs/tags/${tag}:refs/tags/${tag}" \
                && git push origin "refs/tags/${tag}:refs/tags/${tag}"; then
               echo "- pushed: ${tag}" >> "$GITHUB_STEP_SUMMARY"
+
+              # publish_release.yml's on:push:tags trigger is evaluated using
+              # the pushed commit's OWN copy of that file — an upstream commit's
+              # copy has no repository guard (upstream doesn't need one), so
+              # this push unavoidably fires it. Cancel the resulting run rather
+              # than let it fail loudly for secrets this fork doesn't have.
+              for attempt in 1 2 3 4 5; do
+                release_run_id=$(gh run list --repo "${{ github.repository }}" --workflow publish_release.yml \
+                  --json databaseId,headBranch,createdAt \
+                  --jq "[.[] | select(.headBranch == \"${tag}\")] | sort_by(.createdAt) | reverse | .[0].databaseId" 2>/dev/null || echo "")
+                if [ -n "$release_run_id" ] && [ "$release_run_id" != "null" ]; then
+                  echo "Cancelling triggered publish_release.yml run ${release_run_id} for ${tag}..."
+                  gh run cancel "$release_run_id" --repo "${{ github.repository }}" || true
+                  break
+                fi
+                sleep 3
+              done
+
               echo "Triggering build-package.yml for ${tag}..."
               if gh workflow run build-package.yml --repo "${{ github.repository }}" --ref main -f release_tag="${tag}"; then
                 echo "  - triggered build-package.yml (release_tag=${tag})" >> "$GITHUB_STEP_SUMMARY"
