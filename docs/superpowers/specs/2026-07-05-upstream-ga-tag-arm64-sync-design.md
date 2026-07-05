@@ -81,6 +81,16 @@ upstream에 새 GA 태그 등장 (예: v2.15.3)
 3. 빌드 완료 후 `docker buildx imagetools inspect ghcr.io/dasomel/goharbor/harbor-core:v2.15.1`로 amd64+arm64 manifest list가 존재하는지 확인
 4. `build-package.yml` 수정 후에도 기존 main 브랜치 push/workflow_dispatch 빌드가 기존 `build.N` 태깅 방식으로 정상 동작하는지 회귀 확인 (latest 태그 등)
 
+### 3. `build-package.yml`에 GitHub Release 생성 잡 추가
+
+현재 태그가 push되어 이미지가 빌드되어도 이 fork 저장소에는 **git 태그만 남고 GitHub Release가 생성되지 않는다** (`publish_release.yml`의 릴리즈 생성 로직은 `if: github.repository == 'goharbor/harbor'` 조건 때문에 fork에서 실행되지 않음). 태그 push로 빌드가 트리거될 때(`github.ref_type == 'tag'`), 이미지 빌드가 끝난 뒤 다음을 수행하는 잡을 추가한다.
+
+1. upstream(`goharbor/harbor`)의 동일 태그 릴리즈 노트를 GitHub API로 조회
+2. 이미 동일 태그의 Release가 존재하면 스킵 (멱등성)
+3. 없으면 `gh release create <tag>`로 이 fork 저장소에 Release 생성 — 제목에 "linux/amd64, linux/arm64" 명시, 본문은 upstream 릴리즈 노트 + 원본 링크 + arm64 추가 빌드임을 알리는 안내 문구
+
+이 잡은 `build-final-images`가 성공한 뒤 실행되며, 태그 트리거가 아닌 main 브랜치 push/workflow_dispatch에서는 실행되지 않는다.
+
 ## Out of Scope
 
 - 과거(v2.13, v2.14 등 v2.15 미만) 버전의 소급 빌드
