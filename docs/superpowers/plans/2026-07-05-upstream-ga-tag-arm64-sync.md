@@ -1219,8 +1219,10 @@ with:
           contains(steps.changed-files.outputs.modified, 'Dockerfile.base') ||
           contains(steps.changed-files.outputs.modified, 'VERSION') ||
           contains(steps.changed-files.outputs.modified, '.buildbaselog') ||
-          github.ref == 'refs/heads/main'
+          (github.ref == 'refs/heads/main' && inputs.release_tag == '')
 ```
+
+**Correction (caught mid-implementation):** the fifth OR-term (`github.ref == 'refs/heads/main'`) must ALSO be gated with `&& inputs.release_tag == ''`. `sync-release-tags.yml` always dispatches with `--ref main`, so for our path `github.ref` is `refs/heads/main` regardless of `release_tag` — leaving that term ungated would make the step run anyway, defeating the whole fix. Both terms above need the same `&& inputs.release_tag == ''` guard.
 
 - [ ] **Step 2: Validate YAML syntax**
 
