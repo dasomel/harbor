@@ -4,17 +4,26 @@
 
 **Goal:** Every upstream `goharbor/harbor` GA release tag `>= v2.15.0` gets automatically mirrored into this fork, triggers a clean-tagged multi-arch (amd64+arm64) image build on `ghcr.io/dasomel/goharbor`, and gets a corresponding GitHub Release in this fork's repo.
 
-**Architecture:** A new daily workflow (`sync-release-tags.yml`) diffs upstream GA tags against this fork's tags and pushes any missing ones using a PAT (required so the push cascades into `build-package.yml`, which a default `GITHUB_TOKEN` push cannot do). `build-package.yml`'s version-tag computation is fixed so a tag-push trigger produces a clean image tag (`v2.15.1`, no build suffix) instead of the current always-on `-build.N` suffix. A new job in `build-package.yml` creates a GitHub Release mirroring upstream's release notes once the multi-arch images finish building. The tag-diffing and version-tag logic are extracted into small, pure, unit-tested bash scripts so this can be verified without spending CI minutes.
+**Architecture:** A new daily workflow (`sync-release-tags.yml`) diffs upstream GA tags against this fork's tags, pushes any missing ones (as bookkeeping markers), and then **explicitly invokes** `build-package.yml` via `gh workflow run --ref main -f release_tag=<tag>`. `build-package.yml`'s version-tag computation is fixed so both a direct tag push AND a `release_tag`-carrying `workflow_dispatch` produce a clean image tag (`v2.15.1`, no build suffix) instead of the current always-on `-build.N` suffix. A new job in `build-package.yml` creates a GitHub Release mirroring upstream's release notes once the multi-arch images finish building. The tag-diffing and version-tag logic are extracted into small, pure, unit-tested bash scripts so this can be verified without spending CI minutes.
 
 **Tech Stack:** GitHub Actions (bash `run:` steps), `gh` CLI, `docker buildx`/`docker/build-push-action`, plain bash for the two new utility scripts (no new dependencies).
+
+## Design Revision (post Task 1-5 whole-branch review)
+
+The original design (Tasks 1-5) assumed that pushing an upstream tag object to `origin` would trigger `build-package.yml` via its `on: push: tags: 'v*'` trigger. **This is false and was caught by the final whole-branch review, independently confirmed against the real upstream repo:** GitHub Actions evaluates which workflows a `push` event triggers, and with what trigger conditions, using the workflow file **as it exists in the pushed ref's own tree** — not the version on this fork's `main` branch. Since a synced tag (e.g. `v2.15.1`) points at an *upstream* commit, and upstream's own `.github/workflows/build-package.yml` at that commit only triggers `on: push: branches: [main, release-*]` (no `tags:` key at all — confirmed via `git show v2.15.1:.github/workflows/build-package.yml`), pushing that tag to `origin` triggers **nothing**.
+
+**Fix:** stop relying on the tag push itself to trigger the build. `sync-release-tags.yml` still pushes the tag (useful as a human-readable marker and for the idempotency/diffing check), but immediately follows it with an explicit `gh workflow run build-package.yml --ref main -f release_tag=<tag>` call. Because this is invoked with `--ref main`, GitHub Actions uses **this fork's own, current** `build-package.yml` — the one with the fixed version-tag logic, the multi-arch build, and the release job — regardless of what the pushed tag's tree contains. `build-package.yml` gains a new `release_tag` `workflow_dispatch` input: when set, every job's source checkout is pinned to that tag (so the actual Harbor source built is upstream's exact release content), while the workflow *definition* itself still comes from `main`.
+
+This also removes the original PAT requirement for the *push* to matter (a plain `GITHUB_TOKEN` push is fine now, since we no longer depend on it cascading into anything) — but `sync-release-tags.yml` now needs `actions: write` permission so `gh workflow run` can invoke `build-package.yml`.
 
 ## Global Constraints
 
 - Version floor: only GA tags matching `^v[0-9]+\.[0-9]+\.[0-9]+$` (no `-rc`/`-build`/etc suffix) at or above `v2.15.0` are in scope. No upper bound.
-- Tag-triggered image builds must use the clean tag name (e.g. `v2.15.1`) as the final image tag, with no `-build.N` suffix. Non-tag triggers (main branch push, `workflow_dispatch`) keep the existing `<VERSION>-build.<run_number>` scheme.
-- The tag-sync push MUST use `secrets.PAT_TOKEN` (falling back to `secrets.GITHUB_TOKEN` only if PAT_TOKEN is unset, matching the existing pattern in `sync-upstream.yml`). A push made with the default `GITHUB_TOKEN` does not trigger other workflows on this repo — if `PAT_TOKEN` isn't configured as a repo secret, tag pushes will create the git tag but `build-package.yml` will silently never fire. Note this in the PR/handoff.
+- Tag-triggered and `release_tag`-driven image builds must use the clean tag name (e.g. `v2.15.1`) as the final image tag, with no `-build.N` suffix. Plain main-branch/`workflow_dispatch`-without-`release_tag` triggers keep the existing `<VERSION>-build.<run_number>` scheme.
+- `sync-release-tags.yml` must have `permissions: actions: write` (in addition to `contents: write`) so it can call `gh workflow run build-package.yml`. The `secrets.PAT_TOKEN || secrets.GITHUB_TOKEN` fallback pattern (matching `sync-upstream.yml`'s existing convention) is kept for the tag push itself, but a PAT is no longer strictly required for the feature to work end-to-end — the default `GITHUB_TOKEN` with `actions: write` is sufficient for both the push and the `gh workflow run` call.
+- Every `actions/checkout` step in `build-package.yml` that checks out the Harbor source to build (as opposed to just reading this repo's own CI scripts) must honor `ref: ${{ inputs.release_tag || github.ref }}`, so a `release_tag`-driven run builds the exact upstream release source, not whatever is on `main`.
 - New tag-diffing and version-tag logic must be pure (no network calls, no `git` invocations inside the functions) so they can be unit tested with plain fixture data.
-- GitHub Release creation only happens when `github.ref_type == 'tag'`, and must be idempotent (skip if a release for that tag already exists).
+- GitHub Release creation happens when `github.ref_type == 'tag'` OR `inputs.release_tag != ''`, and must be idempotent (skip if a release for that tag already exists). The tag name used throughout that job must come from `inputs.release_tag || github.ref_name`, passed via an `env:` var (never interpolated directly into a `run:` script body via `${{ }}`) — this applies to the release-notes body (already fixed in Task 5) and to the tag name itself (a gap Task 5 left open, since git tag names can contain shell metacharacters and are pushed by anyone with tag-push rights).
 - Do not touch `publish_release.yml`, package/installer build steps, or anything below `v2.15.0`.
 
 ---
@@ -574,28 +583,384 @@ git commit -m "feat(ci): create a GitHub Release mirroring upstream notes on tag
 
 ---
 
-### Task 6: End-to-end verification (live GitHub Actions)
+### Task 6: `release_tag` workflow_dispatch input in `build-package.yml`
+
+**Files:**
+- Modify: `.github/workflows/build-package.yml` (trigger block, `BUILD_PACKAGE` job's second checkout and "Prepare version info" step, every other job's source checkout, `create-github-release` job's gate and tag handling)
+
+**Interfaces:**
+- Consumes: `compute_version_tag` (Task 1), the existing `create-github-release` job (Task 5)
+- Produces: a `release_tag` `workflow_dispatch` input that Task 7's `sync-release-tags.yml` invokes via `gh workflow run`.
+
+- [ ] **Step 1: Add the `release_tag` input to the trigger block**
+
+Replace:
+```yaml
+on:
+  push:
+    tags:
+      - 'v*'  # v2.15.0, v2.16.0 등 버전 태그에만 반응
+  workflow_dispatch:
+```
+with:
+```yaml
+on:
+  push:
+    tags:
+      - 'v*'  # v2.15.0, v2.16.0 등 버전 태그에만 반응
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "업스트림 GA 릴리즈 태그를 이 fork의 CI로 빌드할 때 지정 (예: v2.15.1). 비워두면 기존 workflow_dispatch 동작(build.N 태깅) 그대로."
+        required: false
+        type: string
+        default: ""
+```
+
+- [ ] **Step 2: Pin the `BUILD_PACKAGE` job's source checkout to `release_tag` when provided**
+
+Find the second checkout in the `BUILD_PACKAGE` job (the one with `path: src/github.com/goharbor/harbor`):
+```yaml
+      - uses: actions/checkout@v6
+        with:
+          path: src/github.com/goharbor/harbor
+```
+Replace with:
+```yaml
+      - uses: actions/checkout@v6
+        with:
+          path: src/github.com/goharbor/harbor
+          ref: ${{ inputs.release_tag || github.ref }}
+```
+(The *first* checkout in this job — the one with no `path:`, used to read `./VERSION` and `tools/release/compute_version_tag.sh` — stays untouched; it must keep resolving to `main` so this fork's own CI scripts are present, which is exactly what happens by default when the run is dispatched with `--ref main`.)
+
+- [ ] **Step 3: Update "Prepare version info" to honor `release_tag`**
+
+Replace the step body (as it stands after Task 2's edit):
+```yaml
+      - name: Prepare version info
+        id: version
+        run: |
+          source tools/release/compute_version_tag.sh
+
+          target_release_version=$(cat ./VERSION)
+          target_branch="$(echo ${GITHUB_REF#refs/heads/})"
+          Harbor_Package_Version=$(compute_version_tag "${{ github.ref_type }}" "${{ github.ref_name }}" "$target_release_version" "$GITHUB_RUN_NUMBER")
+
+          if [[ $target_branch == "main" ]]; then
+            Harbor_Assets_Version=$Harbor_Package_Version
+          else
+            Harbor_Assets_Version=$target_release_version
+          fi
+
+          echo "tag=${Harbor_Package_Version}" >> $GITHUB_OUTPUT
+          echo "assets_version=${Harbor_Assets_Version}" >> $GITHUB_OUTPUT
+          echo "HARBOR_VERSION=${Harbor_Assets_Version}" >> $GITHUB_ENV
+```
+with:
+```yaml
+      - name: Prepare version info
+        id: version
+        run: |
+          source tools/release/compute_version_tag.sh
+
+          target_release_version=$(cat ./VERSION)
+          target_branch="$(echo ${GITHUB_REF#refs/heads/})"
+          release_tag="${{ inputs.release_tag }}"
+
+          if [ -n "$release_tag" ]; then
+            ref_type_for_tag="tag"
+            ref_name_for_tag="$release_tag"
+          else
+            ref_type_for_tag="${{ github.ref_type }}"
+            ref_name_for_tag="${{ github.ref_name }}"
+          fi
+
+          Harbor_Package_Version=$(compute_version_tag "$ref_type_for_tag" "$ref_name_for_tag" "$target_release_version" "$GITHUB_RUN_NUMBER")
+
+          if [ -n "$release_tag" ] || [[ $target_branch == "main" ]]; then
+            Harbor_Assets_Version=$Harbor_Package_Version
+          else
+            Harbor_Assets_Version=$target_release_version
+          fi
+
+          echo "tag=${Harbor_Package_Version}" >> $GITHUB_OUTPUT
+          echo "assets_version=${Harbor_Assets_Version}" >> $GITHUB_OUTPUT
+          echo "HARBOR_VERSION=${Harbor_Assets_Version}" >> $GITHUB_ENV
+```
+
+- [ ] **Step 4: Pin every other job's source checkout to `release_tag` when provided**
+
+In each of these jobs — `build-base-images`, `compile-binaries`, `compile-registry`, `compile-trivy-adapter`, `compile-exporter`, `build-final-images` — find the `Checkout repository` step:
+```yaml
+      - name: Checkout repository
+        uses: actions/checkout@v4
+```
+and replace with:
+```yaml
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+```
+Do this in all six jobs listed above (grep for `uses: actions/checkout@v4` to find every occurrence in this file — there should be exactly six, one per job). Do not touch the `BUILD_PACKAGE` job's checkouts again here (already handled in Steps 1-3) or the `create-github-release` job's checkout (handled separately in Step 5 — it doesn't build source, so it doesn't need this).
+
+- [ ] **Step 5: Update the `create-github-release` job's gate and tag handling**
+
+Replace:
+```yaml
+  create-github-release:
+    runs-on: ubuntu-latest
+    needs:
+      - BUILD_PACKAGE
+      - build-final-images
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch upstream release notes
+        id: upstream_notes
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          notes=$(curl -s \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/goharbor/harbor/releases/tags/${tag}" \
+            | jq -r '.body // "(upstream release notes unavailable)"')
+          {
+            echo "notes<<NOTES_EOF"
+            echo "$notes"
+            echo ""
+            echo "---"
+            echo "Mirrored from [goharbor/harbor ${tag}](https://github.com/goharbor/harbor/releases/tag/${tag}), rebuilt here with added \`linux/arm64\` images."
+            echo "NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_NOTES: ${{ steps.upstream_notes.outputs.notes }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $tag already exists, skipping."
+            exit 0
+          fi
+          printf '%s\n' "$RELEASE_NOTES" > /tmp/release_notes.md
+          gh release create "$tag" \
+            --repo "${{ github.repository }}" \
+            --title "${tag} (linux/amd64, linux/arm64)" \
+            --notes-file /tmp/release_notes.md
+```
+with:
+```yaml
+  create-github-release:
+    runs-on: ubuntu-latest
+    needs:
+      - BUILD_PACKAGE
+      - build-final-images
+    if: github.ref_type == 'tag' || inputs.release_tag != ''
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch upstream release notes
+        id: upstream_notes
+        env:
+          TAG_NAME: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag="$TAG_NAME"
+          notes=$(curl -s \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/goharbor/harbor/releases/tags/${tag}" \
+            | jq -r '.body // "(upstream release notes unavailable)"')
+          {
+            echo "notes<<NOTES_EOF"
+            echo "$notes"
+            echo ""
+            echo "---"
+            echo "Mirrored from [goharbor/harbor ${tag}](https://github.com/goharbor/harbor/releases/tag/${tag}), rebuilt here with added \`linux/arm64\` images."
+            echo "NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_NOTES: ${{ steps.upstream_notes.outputs.notes }}
+          TAG_NAME: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag="$TAG_NAME"
+          if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $tag already exists, skipping."
+            exit 0
+          fi
+          printf '%s\n' "$RELEASE_NOTES" > /tmp/release_notes.md
+          gh release create "$tag" \
+            --repo "${{ github.repository }}" \
+            --title "${tag} (linux/amd64, linux/arm64)" \
+            --notes-file /tmp/release_notes.md
+```
+(This also fixes a gap the Task 5 review flagged: `github.ref_name`/the tag name is now passed via the `TAG_NAME` env var instead of being interpolated directly into the script bodies via `${{ }}`, consistent with how `RELEASE_NOTES` was already handled.)
+
+- [ ] **Step 6: Validate YAML syntax**
+
+Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/build-package.yml'))" && echo OK`
+Expected: `OK`
+
+- [ ] **Step 7: Verify all six non-`BUILD_PACKAGE`/non-`create-github-release` checkouts were updated**
+
+Run: `grep -B2 "uses: actions/checkout@v4" .github/workflows/build-package.yml | grep -c "ref: \${{ inputs.release_tag || github.ref }}"`
+Expected: `6` (one per job: `build-base-images`, `compile-binaries`, `compile-registry`, `compile-trivy-adapter`, `compile-exporter`, `build-final-images`). If it's `7`, the `create-github-release` job's checkout was mistakenly also given the `ref:` override — remove it there, since that job never builds source and doesn't need it.
+
+- [ ] **Step 8: Hand-simulate both the plain-tag-push path and the new `release_tag` path**
+
+Run:
+```bash
+source tools/release/compute_version_tag.sh
+# Simulates a direct tag push (unchanged behavior):
+echo "$(compute_version_tag tag v2.15.1 v2.16.0 99)"      # expect: v2.15.1
+# Simulates the release_tag-driven path (release_tag set, ref_type/ref_name overridden to tag/v2.15.1 before calling compute_version_tag — this is exactly what Step 3's new branch does):
+echo "$(compute_version_tag tag v2.15.1 v2.16.0 150)"     # expect: v2.15.1
+# Simulates a plain workflow_dispatch with no release_tag on main (unchanged behavior):
+echo "$(compute_version_tag branch main v2.16.0 150)"     # expect: v2.16.0-build.150
+```
+Expected output:
+```
+v2.15.1
+v2.15.1
+v2.16.0-build.150
+```
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add .github/workflows/build-package.yml
+git commit -m "fix(ci): support release_tag workflow_dispatch input so sync-triggered builds use fork's own workflow
+
+The sync-release-tags workflow cannot rely on pushing an upstream tag to
+trigger build-package.yml's on:push:tags — GitHub Actions evaluates that
+trigger using the pushed ref's own tree, which for an upstream tag is
+upstream's original build-package.yml (no tags trigger at all). Instead,
+sync-release-tags.yml now explicitly invokes this workflow via
+workflow_dispatch with a release_tag input, pinning every source checkout
+to that tag while still running this fork's own (main-branch) workflow
+definition."
+```
+
+---
+
+### Task 7: Explicit `gh workflow run` invocation in `sync-release-tags.yml`
+
+**Files:**
+- Modify: `.github/workflows/sync-release-tags.yml` (permissions block, the push loop)
+
+**Interfaces:**
+- Consumes: the `release_tag` input added to `build-package.yml` in Task 6.
+- Produces: nothing new consumed elsewhere — this is the last piece of the trigger chain.
+
+- [ ] **Step 1: Add `actions: write` permission**
+
+Replace:
+```yaml
+    permissions:
+      contents: write
+```
+with:
+```yaml
+    permissions:
+      contents: write
+      actions: write
+```
+
+- [ ] **Step 2: Invoke `build-package.yml` explicitly after each successful tag push**
+
+Find the push loop (inside the "Sync missing upstream GA tags" step):
+```bash
+          failed=0
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            echo "Fetching and pushing ${tag}..."
+            if git fetch upstream "refs/tags/${tag}:refs/tags/${tag}" \
+               && git push origin "refs/tags/${tag}:refs/tags/${tag}"; then
+              echo "- pushed: ${tag}" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- FAILED: ${tag}" >> "$GITHUB_STEP_SUMMARY"
+              failed=1
+            fi
+          done <<< "$missing"
+
+          exit $failed
+```
+Replace with:
+```bash
+          failed=0
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            echo "Fetching and pushing ${tag}..."
+            if git fetch upstream "refs/tags/${tag}:refs/tags/${tag}" \
+               && git push origin "refs/tags/${tag}:refs/tags/${tag}"; then
+              echo "- pushed: ${tag}" >> "$GITHUB_STEP_SUMMARY"
+              echo "Triggering build-package.yml for ${tag}..."
+              if gh workflow run build-package.yml --repo "${{ github.repository }}" --ref main -f release_tag="${tag}"; then
+                echo "  - triggered build-package.yml (release_tag=${tag})" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "  - FAILED to trigger build-package.yml for ${tag}" >> "$GITHUB_STEP_SUMMARY"
+                failed=1
+              fi
+            else
+              echo "- FAILED: ${tag}" >> "$GITHUB_STEP_SUMMARY"
+              failed=1
+            fi
+          done <<< "$missing"
+
+          exit $failed
+```
+(`gh` is already authenticated for this step via the existing `GH_TOKEN` env var on the "Sync missing upstream GA tags" step — no new env var needed. `gh workflow run` needs `actions: write`, added in Step 1.)
+
+- [ ] **Step 3: Validate YAML syntax**
+
+Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/sync-release-tags.yml'))" && echo OK`
+Expected: `OK`
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add .github/workflows/sync-release-tags.yml
+git commit -m "fix(ci): explicitly trigger build-package.yml via workflow_dispatch instead of relying on tag push"
+```
+
+---
+
+### Task 8: End-to-end verification (live GitHub Actions)
 
 **Files:** none (operational verification only)
 
-**Interfaces:** none — this task exercises Tasks 1-5 together against the real GitHub repo.
+**Interfaces:** none — this task exercises Tasks 1-7 together against the real GitHub repo.
 
-- [ ] **Step 1: Confirm `PAT_TOKEN` secret exists**
+- [ ] **Step 1: Push the branch's commits to `origin/main`**
 
-Run: `gh secret list --repo dasomel/harbor`
-Expected: `PAT_TOKEN` is listed. If it is missing, tag pushes from Task 4's workflow will create tags but will NOT trigger `build-package.yml` (GitHub Actions does not cascade-trigger workflows from a push authenticated with the default `GITHUB_TOKEN`) — stop and get a PAT configured before proceeding.
+This branch's work needs to land on `main` before the daily `schedule` trigger (or a manual `workflow_dispatch`) can exercise it end-to-end. Follow the project's normal merge process for this (e.g. `superpowers:finishing-a-development-branch`) rather than force-pushing directly.
 
-- [ ] **Step 2: Push the two new workflow files and run a dry-run sync**
+- [ ] **Step 2: Run a dry-run sync**
 
 ```bash
-git push origin main
 gh workflow run sync-release-tags.yml --repo dasomel/harbor -f dry_run=true
 ```
 
 - [ ] **Step 3: Confirm the dry-run summary lists the expected missing tags**
 
 Run: `gh run view --repo dasomel/harbor --workflow sync-release-tags.yml --log | grep -A5 "Missing GA tags"`
-Expected: output includes `v2.15.1` and `v2.15.2`.
+Expected: output includes `v2.15.1` and `v2.15.2` (and by now, possibly newer GA tags too, since upstream releases continuously).
 
 - [ ] **Step 4: Run for real**
 
@@ -603,10 +968,10 @@ Expected: output includes `v2.15.1` and `v2.15.2`.
 gh workflow run sync-release-tags.yml --repo dasomel/harbor -f dry_run=false
 ```
 
-- [ ] **Step 5: Confirm `build-package.yml` was triggered per pushed tag**
+- [ ] **Step 5: Confirm `build-package.yml` was explicitly triggered per tag, not via a tag-push event**
 
-Run: `gh run list --repo dasomel/harbor --workflow build-package.yml --limit 5`
-Expected: new runs with `event: push` and the ref matching each newly pushed tag (e.g. `v2.15.1`, `v2.15.2`).
+Run: `gh run list --repo dasomel/harbor --workflow build-package.yml --limit 5 --json event,displayTitle,status`
+Expected: new runs with `"event": "workflow_dispatch"` (not `"push"`), one per newly-synced tag.
 
 - [ ] **Step 6: After a build completes, confirm the multi-arch image and the clean tag**
 
