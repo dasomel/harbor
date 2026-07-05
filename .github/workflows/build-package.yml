@@ -344,6 +344,7 @@ jobs:
             -e GOOS=linux \
             -e GOARCH=amd64 \
             -e GOFLAGS="-buildvcs=false" \
+            -e GOTOOLCHAIN=auto \
             golang:1.24 \
             go build -ldflags "${LDFLAGS}" -o /harbor/make/photon/${{ matrix.component }}/binary/amd64/${{ matrix.binary_name }} .
 
@@ -361,6 +362,7 @@ jobs:
             -e GOOS=linux \
             -e GOARCH=arm64 \
             -e GOFLAGS="-buildvcs=false" \
+            -e GOTOOLCHAIN=auto \
             golang:1.24 \
             go build -ldflags "${LDFLAGS}" -o /harbor/make/photon/${{ matrix.component }}/binary/arm64/${{ matrix.binary_name }} .
 
@@ -403,6 +405,7 @@ jobs:
             -e GOARCH=amd64 \
             -e GO111MODULE=auto \
             -e GOFLAGS="-buildvcs=false" \
+            -e GOTOOLCHAIN=auto \
             golang:1.24 \
             go build -tags "include_oss include_gcs" -o registry_amd64 ./cmd/registry
           cp /tmp/distribution/registry_amd64 ${{ github.workspace }}/make/photon/registry/binary/amd64/registry
@@ -418,6 +421,7 @@ jobs:
             -e GOARCH=arm64 \
             -e GO111MODULE=auto \
             -e GOFLAGS="-buildvcs=false" \
+            -e GOTOOLCHAIN=auto \
             golang:1.24 \
             go build -tags "include_oss include_gcs" -o registry_arm64 ./cmd/registry
           cp /tmp/distribution/registry_arm64 ${{ github.workspace }}/make/photon/registry/binary/arm64/registry
