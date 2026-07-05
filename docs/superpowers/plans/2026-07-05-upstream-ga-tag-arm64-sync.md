@@ -1602,3 +1602,240 @@ guard (upstream doesn't need one), so every synced tag fires it, and it
 fails loudly for AWS/DockerHub secrets this fork doesn't have. Cancel the
 resulting run instead of letting it fail noisily."
 ```
+
+---
+
+### Task 14: Let Go auto-select the toolchain version instead of hardcoding `golang:1.24`
+
+**Files:**
+- Modify: `.github/workflows/build-package.yml` (four `docker run ... golang:1.24 ...` blocks, in `compile-binaries` and `compile-registry` jobs)
+
+**Interfaces:** none — purely additive `-e` flags on existing `docker run` invocations.
+
+**Why:** live end-to-end testing (Task 8, re-run after Tasks 11/12) found `compile-binaries (core/jobservice/registryctl)` and `compile-registry` all failing with:
+```
+go: ../go.mod requires go >= 1.25.7 (running go 1.24.13; GOTOOLCHAIN=local)
+```
+Confirmed directly (`git show <tag>:src/go.mod`):
+- `v2.15.0` requires `go 1.25.7`
+- `v2.15.1` requires `go 1.25.9`
+- `v2.15.2` requires `go 1.26.4`
+- current `main` also requires `go 1.26.4`
+
+`build-package.yml` hardcodes the `golang:1.24` Docker image for these compile steps — this is a pre-existing bug affecting `main`-branch builds too (main's own `go.mod` already needs 1.26.4), not specific to `release_tag` builds; our feature's dynamic checkouts across multiple historical `go.mod` requirements just makes a single hardcoded version even less viable (no one fixed version could satisfy `v2.15.0`'s 1.25.7 floor, `v2.15.2`'s 1.26.4 floor, and any future release's floor, simultaneously). Go has built-in support for exactly this: when `GOTOOLCHAIN=auto` (the modern Go default outside this container), `go build` automatically downloads and uses whichever newer toolchain the checked-out `go.mod` declares, with no hardcoded version needed anywhere — self-adapting the same way Task 12's dynamic component discovery does, just for the Go toolchain instead of the component matrix. The `golang:1.24` image apparently pins `GOTOOLCHAIN=local` by default (confirmed in the error's own `GOTOOLCHAIN=local` in the failing log line), so it needs to be explicitly overridden.
+
+- [ ] **Step 1: Add `GOTOOLCHAIN=auto` to `compile-binaries`' AMD64 step**
+
+Replace:
+```yaml
+          docker run --rm \
+            -v $(pwd):/harbor \
+            -w /harbor/src/${{ matrix.component }} \
+            -e CGO_ENABLED=0 \
+            -e GOOS=linux \
+            -e GOARCH=amd64 \
+            -e GOFLAGS="-buildvcs=false" \
+            golang:1.24 \
+            go build -ldflags "${LDFLAGS}" -o /harbor/make/photon/${{ matrix.component }}/binary/amd64/${{ matrix.binary_name }} .
+```
+with:
+```yaml
+          docker run --rm \
+            -v $(pwd):/harbor \
+            -w /harbor/src/${{ matrix.component }} \
+            -e CGO_ENABLED=0 \
+            -e GOOS=linux \
+            -e GOARCH=amd64 \
+            -e GOFLAGS="-buildvcs=false" \
+            -e GOTOOLCHAIN=auto \
+            golang:1.24 \
+            go build -ldflags "${LDFLAGS}" -o /harbor/make/photon/${{ matrix.component }}/binary/amd64/${{ matrix.binary_name }} .
+```
+
+- [ ] **Step 2: Same for `compile-binaries`' ARM64 step**
+
+Replace:
+```yaml
+          docker run --rm \
+            -v $(pwd):/harbor \
+            -w /harbor/src/${{ matrix.component }} \
+            -e CGO_ENABLED=0 \
+            -e GOOS=linux \
+            -e GOARCH=arm64 \
+            -e GOFLAGS="-buildvcs=false" \
+            golang:1.24 \
+            go build -ldflags "${LDFLAGS}" -o /harbor/make/photon/${{ matrix.component }}/binary/arm64/${{ matrix.binary_name }} .
+```
+with:
+```yaml
+          docker run --rm \
+            -v $(pwd):/harbor \
+            -w /harbor/src/${{ matrix.component }} \
+            -e CGO_ENABLED=0 \
+            -e GOOS=linux \
+            -e GOARCH=arm64 \
+            -e GOFLAGS="-buildvcs=false" \
+            -e GOTOOLCHAIN=auto \
+            golang:1.24 \
+            go build -ldflags "${LDFLAGS}" -o /harbor/make/photon/${{ matrix.component }}/binary/arm64/${{ matrix.binary_name }} .
+```
+
+- [ ] **Step 3: Same for `compile-registry`'s AMD64 step**
+
+Replace:
+```yaml
+          docker run --rm \
+            -v /tmp/distribution:/go/src/github.com/docker/distribution \
+            -w /go/src/github.com/docker/distribution \
+            -e CGO_ENABLED=0 \
+            -e GOOS=linux \
+            -e GOARCH=amd64 \
+            -e GO111MODULE=auto \
+            -e GOFLAGS="-buildvcs=false" \
+            golang:1.24 \
+            go build -tags "include_oss include_gcs" -o registry_amd64 ./cmd/registry
+```
+with:
+```yaml
+          docker run --rm \
+            -v /tmp/distribution:/go/src/github.com/docker/distribution \
+            -w /go/src/github.com/docker/distribution \
+            -e CGO_ENABLED=0 \
+            -e GOOS=linux \
+            -e GOARCH=amd64 \
+            -e GO111MODULE=auto \
+            -e GOFLAGS="-buildvcs=false" \
+            -e GOTOOLCHAIN=auto \
+            golang:1.24 \
+            go build -tags "include_oss include_gcs" -o registry_amd64 ./cmd/registry
+```
+
+- [ ] **Step 4: Same for `compile-registry`'s ARM64 step**
+
+Replace:
+```yaml
+          docker run --rm \
+            -v /tmp/distribution:/go/src/github.com/docker/distribution \
+            -w /go/src/github.com/docker/distribution \
+            -e CGO_ENABLED=0 \
+            -e GOOS=linux \
+            -e GOARCH=arm64 \
+            -e GO111MODULE=auto \
+            -e GOFLAGS="-buildvcs=false" \
+            golang:1.24 \
+            go build -tags "include_oss include_gcs" -o registry_arm64 ./cmd/registry
+```
+with:
+```yaml
+          docker run --rm \
+            -v /tmp/distribution:/go/src/github.com/docker/distribution \
+            -w /go/src/github.com/docker/distribution \
+            -e CGO_ENABLED=0 \
+            -e GOOS=linux \
+            -e GOARCH=arm64 \
+            -e GO111MODULE=auto \
+            -e GOFLAGS="-buildvcs=false" \
+            -e GOTOOLCHAIN=auto \
+            golang:1.24 \
+            go build -tags "include_oss include_gcs" -o registry_arm64 ./cmd/registry
+```
+
+- [ ] **Step 5: Validate YAML syntax**
+
+Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/build-package.yml'))" && echo OK`
+Expected: `OK`
+
+- [ ] **Step 6: Verify exactly 4 occurrences were added**
+
+Run: `grep -c 'GOTOOLCHAIN=auto' .github/workflows/build-package.yml`
+Expected: `4`
+
+- [ ] **Step 7: Sanity-check `GOTOOLCHAIN=auto` actually resolves the version mismatch (local Docker, read-only — doesn't touch the repo)**
+
+Run:
+```bash
+docker run --rm -e GOTOOLCHAIN=auto -e GOFLAGS="-buildvcs=false" golang:1.24 sh -c 'mkdir -p /tmp/t && cd /tmp/t && printf "module t\ngo 1.25.7\n" > go.mod && printf "package main\nfunc main(){}\n" > main.go && go build -o /tmp/t/out . && echo BUILD_OK'
+```
+Expected: downloads the Go 1.25.7 toolchain automatically and prints `BUILD_OK` (confirms `GOTOOLCHAIN=auto` on this exact base image resolves a `go.mod` floor higher than the image's bundled Go version — the same shape of mismatch seen in the real failure, reproduced and fixed in isolation before touching the real workflow).
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add .github/workflows/build-package.yml
+git commit -m "fix(ci): let Go auto-select its toolchain instead of hardcoding golang:1.24
+
+v2.15.0/v2.15.1/v2.15.2 (and current main) all require a newer Go than
+1.24 (1.25.7/1.25.9/1.26.4/1.26.4 respectively) per their own go.mod, but
+compile-binaries/compile-registry hardcode the golang:1.24 image with
+GOTOOLCHAIN=local, so every one of them fails immediately. GOTOOLCHAIN=auto
+lets Go download and use whatever version go.mod actually declares, so
+no single release's Go floor needs to be hardcoded or kept in sync here."
+```
+
+---
+
+### Task 15: Fix the stale `trivy` release download (v0.65.0 no longer exists)
+
+**Files:**
+- Modify: `.github/workflows/build-package.yml` (two `TRIVY_VERSION: v0.65.0` lines)
+
+**Interfaces:** none — a version-string constant used by `compile-trivy-adapter`'s download step and the `build-final-images` job's `versions` file generation.
+
+**Why:** live end-to-end testing found `compile-trivy-adapter` failing:
+```
+gzip: stdin: not in gzip format
+tar: Child returned status 1
+```
+The download URL is `https://github.com/aquasecurity/trivy/releases/download/v0.65.0/trivy_0.65.0_Linux-64bit.tar.gz`. Confirmed directly: `curl -s https://api.github.com/repos/aquasecurity/trivy/releases/tags/v0.65.0` returns `{"message": "Not Found", ...}` — this release no longer exists at all (the 9 bytes `curl` actually downloaded were GitHub's `Not Found` JSON error body, which `tar` then correctly refused to treat as a gzip stream). The current latest release is `v0.72.0`, confirmed to exist with the same `trivy_<version>_Linux-64bit.tar.gz` / `trivy_<version>_Linux-ARM64.tar.gz` asset naming pattern this workflow already expects — only the version number itself is stale, not the URL structure.
+
+- [ ] **Step 1: Bump `TRIVY_VERSION` in both places**
+
+There are two identical `TRIVY_VERSION: v0.65.0` lines (one in `compile-trivy-adapter`'s job-level `env:`, one in `build-final-images`'s job-level `env:`). Replace both occurrences:
+
+Find (appears twice):
+```yaml
+      TRIVY_VERSION: v0.65.0
+```
+Replace both with:
+```yaml
+      TRIVY_VERSION: v0.72.0
+```
+
+- [ ] **Step 2: Validate YAML syntax**
+
+Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/build-package.yml'))" && echo OK`
+Expected: `OK`
+
+- [ ] **Step 3: Verify the new version's release assets actually exist (read-only network check)**
+
+Run:
+```bash
+curl -s "https://api.github.com/repos/aquasecurity/trivy/releases/tags/v0.72.0" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+names = [a['name'] for a in d.get('assets', [])]
+assert 'trivy_0.72.0_Linux-64bit.tar.gz' in names, 'AMD64 asset missing'
+assert 'trivy_0.72.0_Linux-ARM64.tar.gz' in names, 'ARM64 asset missing'
+print('OK: both AMD64 and ARM64 assets exist for v0.72.0')
+"
+```
+Expected: `OK: both AMD64 and ARM64 assets exist for v0.72.0`
+
+- [ ] **Step 4: Confirm exactly two occurrences were updated, none missed**
+
+Run: `grep -n 'TRIVY_VERSION:' .github/workflows/build-package.yml`
+Expected: two lines, both reading `TRIVY_VERSION: v0.72.0` (plus a third, unrelated line `TRIVY_VERSION: ${{ env.TRIVY_VERSION }}` used inside the `versions` file heredoc — that one's a reference, not a literal version, and should NOT have been changed).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add .github/workflows/build-package.yml
+git commit -m "fix(ci): bump stale trivy release version — v0.65.0 no longer exists
+
+compile-trivy-adapter's download of trivy_0.65.0_Linux-64bit.tar.gz was
+failing with 'gzip: stdin: not in gzip format' — the v0.65.0 GitHub
+release itself no longer exists (confirmed via the releases API), so
+curl was silently downloading a 9-byte 'Not Found' error body instead.
+v0.72.0 is the current latest release with the same asset naming
+pattern this workflow already expects."
+```
