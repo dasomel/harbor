@@ -27,6 +27,21 @@ assert_eq "filters out pre-v2.15.0, rc, and build-suffixed tags" "$expected" "$a
 actual_empty=$(printf 'v2.14.0\nv2.14.5\n' | filter_ga_tags_min_version "v2.15.0")
 assert_eq "returns nothing when all tags are below the floor" "" "$actual_empty"
 
+# Regression: a DIRECT call (not wrapped in `x=$(...)`) must not abort the
+# calling script under `set -e` when the input has zero GA matches — this
+# is exactly how sync-release-tags.yml invokes it, unlike the assignment
+# form above (which bash's set -e semantics exempt from failure detection
+# and so cannot catch this class of bug).
+direct_call_output_file=$(mktemp)
+if (set -euo pipefail; printf '' | filter_ga_tags_min_version "v2.15.0" > "$direct_call_output_file"); then
+  direct_call_exit=0
+else
+  direct_call_exit=$?
+fi
+assert_eq "direct call (no assignment) exits 0 even when nothing matches" "0" "$direct_call_exit"
+assert_eq "direct call produces empty output when nothing matches" "" "$(cat "$direct_call_output_file")"
+rm -f "$direct_call_output_file"
+
 # --- diff_missing_tags ---
 
 tmp_dir=$(mktemp -d)

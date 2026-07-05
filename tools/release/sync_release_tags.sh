@@ -10,7 +10,7 @@
 # ascending by version.
 filter_ga_tags_min_version() {
   local min_version="$1"
-  grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+  { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
     | while IFS= read -r tag; do
         if [ "$(printf '%s\n%s\n' "$min_version" "$tag" | sort -V | head -n1)" = "$min_version" ]; then
           echo "$tag"
