@@ -61,16 +61,18 @@ jobs:
       - name: Prepare version info
         id: version
         run: |
+          source tools/release/compute_version_tag.sh
+
           target_release_version=$(cat ./VERSION)
-          Harbor_Package_Version=$target_release_version-'build.'$GITHUB_RUN_NUMBER
           target_branch="$(echo ${GITHUB_REF#refs/heads/})"
-          
+          Harbor_Package_Version=$(compute_version_tag "${{ github.ref_type }}" "${{ github.ref_name }}" "$target_release_version" "$GITHUB_RUN_NUMBER")
+
           if [[ $target_branch == "main" ]]; then
             Harbor_Assets_Version=$Harbor_Package_Version
           else
             Harbor_Assets_Version=$target_release_version
           fi
-          
+
           echo "tag=${Harbor_Package_Version}" >> $GITHUB_OUTPUT
           echo "assets_version=${Harbor_Assets_Version}" >> $GITHUB_OUTPUT
           echo "HARBOR_VERSION=${Harbor_Assets_Version}" >> $GITHUB_ENV
