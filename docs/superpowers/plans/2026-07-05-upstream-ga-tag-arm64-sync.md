@@ -981,4 +981,98 @@ Expected: a manifest list containing both `linux/amd64` and `linux/arm64` platfo
 - [ ] **Step 7: Confirm the GitHub Release was created**
 
 Run: `gh release view v2.15.1 --repo dasomel/harbor`
+
+---
+
+### Task 9: Key idempotency off Release existence, not tag-in-origin (self-healing retry)
+
+**Files:**
+- Modify: `.github/workflows/sync-release-tags.yml` (the "Sync missing upstream GA tags" step's data-gathering lines)
+
+**Interfaces:**
+- Consumes: `filter_ga_tags_min_version`, `diff_missing_tags` from Task 3 — unchanged signatures, just fed a different "already have" data source.
+
+**Why:** the round-2 whole-branch review found that once the tag push and the actual build were decoupled (Task 6-7's fix), keying "is this tag missing?" off "does the tag exist in `origin`" creates a silent stuck state: the tag gets pushed BEFORE the build runs, so if `gh workflow run` fails, or the dispatched `build-package.yml` run later fails for any reason (transient runner issue, one failing matrix component, etc.), the tag is already in `origin` — so the next day's sync sees it as "not missing" and never retries, and no GitHub Release or images are ever produced for that version, with no visible signal. Keying idempotency off **"does a GitHub Release already exist for this tag"** instead makes the loop self-healing: a failed build leaves no Release, so the tag is still treated as missing and retried on the next scheduled run (re-pushing an identical tag is a harmless no-op; re-running `gh workflow run` is exactly the retry we want).
+
+- [ ] **Step 1: Replace the "already have" data source**
+
+Replace:
+```bash
+          tmp_dir=$(mktemp -d)
+          git ls-remote --tags upstream | awk '{print $2}' | sed 's#refs/tags/##; s/\^{}//' | sort -u > "$tmp_dir/upstream_raw.txt"
+          git ls-remote --tags origin   | awk '{print $2}' | sed 's#refs/tags/##; s/\^{}//' | sort -u > "$tmp_dir/origin_raw.txt"
+
+          filter_ga_tags_min_version "$MIN_GA_VERSION" < "$tmp_dir/upstream_raw.txt" > "$tmp_dir/upstream_ga.txt"
+          filter_ga_tags_min_version "$MIN_GA_VERSION" < "$tmp_dir/origin_raw.txt"   > "$tmp_dir/origin_ga.txt"
+
+          missing=$(diff_missing_tags "$tmp_dir/upstream_ga.txt" "$tmp_dir/origin_ga.txt")
+
+          {
+            echo "## Sync Release Tags"
+            echo
+            if [ -z "$missing" ]; then
+              echo "No missing GA tags (>= ${MIN_GA_VERSION}). Nothing to do."
+            else
+              echo "Missing GA tags (>= ${MIN_GA_VERSION}):"
+              echo '```'
+              echo "$missing"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+```
+with:
+```bash
+          tmp_dir=$(mktemp -d)
+          git ls-remote --tags upstream | awk '{print $2}' | sed 's#refs/tags/##; s/\^{}//' | sort -u > "$tmp_dir/upstream_raw.txt"
+          gh release list --repo "${{ github.repository }}" --limit 1000 --json tagName -q '.[].tagName' | sort -u > "$tmp_dir/released_raw.txt"
+
+          filter_ga_tags_min_version "$MIN_GA_VERSION" < "$tmp_dir/upstream_raw.txt" > "$tmp_dir/upstream_ga.txt"
+          filter_ga_tags_min_version "$MIN_GA_VERSION" < "$tmp_dir/released_raw.txt" > "$tmp_dir/released_ga.txt"
+
+          missing=$(diff_missing_tags "$tmp_dir/upstream_ga.txt" "$tmp_dir/released_ga.txt")
+
+          {
+            echo "## Sync Release Tags"
+            echo
+            if [ -z "$missing" ]; then
+              echo "No GA tags (>= ${MIN_GA_VERSION}) without a completed Release. Nothing to do."
+            else
+              echo "GA tags (>= ${MIN_GA_VERSION}) without a completed Release (will be (re-)triggered):"
+              echo '```'
+              echo "$missing"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+```
+
+Do not change anything below this (the `DRY_RUN` check, or the push/trigger loop) — the loop still needs to push the tag (idempotent no-op if it's already there from a previous failed attempt) before calling `gh workflow run`, since `build-package.yml`'s checkout steps resolve `ref: inputs.release_tag` against `origin`, which requires the tag to actually exist there.
+
+- [ ] **Step 2: Validate YAML syntax**
+
+Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/sync-release-tags.yml'))" && echo OK`
+Expected: `OK`
+
+- [ ] **Step 3: Confirm the re-run behavior with the real repo (read-only — this just lists current releases, no writes)**
+
+Run:
+```bash
+gh release list --repo dasomel/harbor --limit 1000 --json tagName -q '.[].tagName' | sort -u
+```
+Expected: prints whatever GitHub Releases currently exist on the fork (very likely empty right now, since none have been created yet) — confirms the command itself is valid and reachable with the current `gh` auth, independent of the workflow.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add .github/workflows/sync-release-tags.yml
+git commit -m "fix(ci): key tag-sync idempotency off Release existence, not tag-in-origin
+
+Pushing the tag and running the build are now decoupled (a prior fix made
+sync-release-tags.yml explicitly invoke build-package.yml via
+workflow_dispatch rather than relying on the push itself to trigger it).
+Checking 'does this tag exist in origin' to decide what's missing meant a
+failed build left a permanently-stuck, silently-unretried tag: the tag was
+already pushed, so the next day's sync saw nothing to do. Keying off
+'does a GitHub Release exist for this tag' instead makes a failed run
+self-healing — it gets retried on the next scheduled sync."
+```
 Expected: a release titled `v2.15.1 (linux/amd64, linux/arm64)` with body text mentioning it was mirrored from `goharbor/harbor`.
