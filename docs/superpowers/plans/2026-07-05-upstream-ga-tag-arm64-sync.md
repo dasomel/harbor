@@ -1264,3 +1264,341 @@ Wait for the triggered `build-package.yml` run(s) to reach the `build-base-image
 gh run list --repo dasomel/harbor --workflow build-package.yml --limit 3 --json databaseId,status,conclusion
 ```
 Expected: the run no longer fails within seconds — it should be `in_progress` for a meaningful duration (the real multi-arch build takes roughly an hour), not `completed`/`failure` almost immediately.
+
+---
+
+### Task 12: Dynamically discover buildable components instead of a hardcoded matrix (fixes redis→valkey break)
+
+**Files:**
+- Modify: `.github/workflows/build-package.yml` (add a new `discover-components` job; change `build-base-images` and `build-final-images`'s `strategy.matrix.component` to consume it; add a `valkey` case to both "Set component info" steps; add `valkey`/`valkey-photon` to the `summary` job's hardcoded component/package lists)
+
+**Interfaces:**
+- Produces: `needs.discover-components.outputs.components` — a JSON array string (e.g. `["core","db",...,"valkey"]`) consumed via `fromJson(...)` by `build-base-images` and `build-final-images`'s `strategy.matrix.component`.
+
+**Why:** live end-to-end testing (Task 8) found that the real `v2.15.2` build failed with:
+```
+##[error]buildx failed with: ERROR: failed to build: resolve : lstat make/photon/redis: no such file or directory
+```
+Upstream Harbor renamed its cache backend from Redis to Valkey between `v2.15.1` and `v2.15.2` (`git log` shows commit `88ab66244 feat: replace redis with valkey as cache backend (#23157)`), renaming `make/photon/redis` → `make/photon/valkey`. Confirmed directly:
+- `v2.15.0` and `v2.15.1` trees have `make/photon/redis` (no `valkey`).
+- `v2.15.2` and this fork's current `main` both have `make/photon/valkey` (no `redis`).
+
+`build-package.yml`'s `build-base-images`/`build-final-images` jobs hardcode `redis` in their `strategy.matrix.component` list — this was never updated when `main`'s own source renamed the directory, so **this is a pre-existing bug on `main` itself**, unrelated to the ARM64 sync feature, that this feature's `release_tag` mechanism now reliably exposes for every `v2.15.2+` build. A single static matrix cannot correctly build both `v2.15.0`/`v2.15.1` (need `redis`) and `v2.15.2`+ (need `valkey`) — the fix discovers the actual buildable component directories from whichever source tree is actually checked out (the `release_tag`, or `main` for ordinary builds), so it self-adapts to this rename (and any future one) automatically.
+
+Confirmed naming convention for the new component (not guessed): `tests/docker-compose.test.yml:24` already references `goharbor/valkey-photon:__version__`, and `.github/workflows/nightly-trivy-scan.yml:17` already lists `valkey-photon` — both already use this name, only `build-package.yml` was missed. The base-image Dockerfile itself (`make/photon/valkey/Dockerfile`) does `FROM ${harbor_base_namespace}/harbor-valkey-base:...`, matching `build-base-images`' existing `harbor-${{ matrix.component }}-base` tag pattern automatically once `matrix.component` is `valkey`.
+
+- [ ] **Step 1: Add the `discover-components` job**
+
+Insert this new job into `.github/workflows/build-package.yml`, right after the `BUILD_PACKAGE` job's closing (i.e., immediately before the `# 2단계: Base 이미지 빌드` comment / `build-base-images:` job):
+
+```yaml
+  # ========================================
+  # 1.5단계: 실제 체크아웃된 소스에서 빌드 가능한 컴포넌트 동적 탐지
+  # ========================================
+  discover-components:
+    runs-on: ubuntu-latest
+    outputs:
+      components: ${{ steps.discover.outputs.components }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+
+      - name: Discover buildable components
+        id: discover
+        run: |
+          set -euo pipefail
+          components=$(for d in make/photon/*/; do
+            name=$(basename "$d")
+            if [ -f "make/photon/${name}/Dockerfile.base" ]; then
+              echo "$name"
+            fi
+          done | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "Discovered components: ${components}"
+          echo "components=${components}" >> "$GITHUB_OUTPUT"
+```
+
+(This checks out the same ref the rest of the pipeline builds from — `release_tag` when set, otherwise the triggering ref — and lists every `make/photon/<name>/` subdirectory that has a `Dockerfile.base`. This naturally excludes `make/photon/common/` and `make/photon/standalone-db-migrator/`, which have no `Dockerfile.base` and were never part of the build matrix.)
+
+- [ ] **Step 2: Wire `build-base-images`' matrix to the discovered list**
+
+Replace:
+```yaml
+  build-base-images:
+    runs-on: ubuntu-latest
+    needs: BUILD_PACKAGE
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - core
+          - db
+          - exporter
+          - jobservice
+          - log
+          - nginx
+          - portal
+          - prepare
+          - redis
+          - registry
+          - registryctl
+          - trivy-adapter
+```
+with:
+```yaml
+  build-base-images:
+    runs-on: ubuntu-latest
+    needs:
+      - BUILD_PACKAGE
+      - discover-components
+    strategy:
+      fail-fast: false
+      matrix:
+        component: ${{ fromJson(needs.discover-components.outputs.components) }}
+```
+
+- [ ] **Step 3: Wire `build-final-images`' matrix the same way**
+
+Replace:
+```yaml
+  build-final-images:
+    runs-on: ubuntu-latest
+    needs:
+      - BUILD_PACKAGE
+      - build-base-images
+      - compile-binaries
+      - compile-registry
+      - compile-trivy-adapter
+      - compile-exporter
+
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - core
+          - db
+          - exporter
+          - jobservice
+          - log
+          - nginx
+          - portal
+          - prepare
+          - redis
+          - registry
+          - registryctl
+          - trivy-adapter
+```
+with:
+```yaml
+  build-final-images:
+    runs-on: ubuntu-latest
+    needs:
+      - BUILD_PACKAGE
+      - build-base-images
+      - compile-binaries
+      - compile-registry
+      - compile-trivy-adapter
+      - compile-exporter
+      - discover-components
+
+    strategy:
+      fail-fast: false
+      matrix:
+        component: ${{ fromJson(needs.discover-components.outputs.components) }}
+```
+
+- [ ] **Step 4: Add a `valkey` case to both "Set component info" steps**
+
+There are two identical `case "${{ matrix.component }}" in` blocks (one in `build-base-images`, one in `build-final-images`). In BOTH, add a `valkey)` branch immediately after the existing `redis)` branch — do not remove or change the `redis)` branch, since `v2.15.0`/`v2.15.1` still need it:
+
+Find (appears twice):
+```yaml
+            redis) DESC="Harbor Redis"; NAME="redis-photon" ;;
+```
+and add immediately after each occurrence:
+```yaml
+            valkey) DESC="Harbor Valkey"; NAME="valkey-photon" ;;
+```
+
+- [ ] **Step 5: Add `valkey`/`valkey-photon` to the `summary` job's hardcoded lists (cosmetic, best-effort)**
+
+These two lists are informational only (a step-summary table and a package-visibility loop) — they don't gate the actual build — but should mention both names since either one might have actually been built depending on which `release_tag` triggered the run.
+
+Replace:
+```yaml
+          COMPONENTS="harbor-core harbor-db harbor-exporter harbor-jobservice harbor-log nginx-photon harbor-portal harbor-prepare redis-photon registry-photon harbor-registryctl trivy-adapter-photon"
+```
+with:
+```yaml
+          COMPONENTS="harbor-core harbor-db harbor-exporter harbor-jobservice harbor-log nginx-photon harbor-portal harbor-prepare redis-photon valkey-photon registry-photon harbor-registryctl trivy-adapter-photon"
+```
+
+Replace:
+```yaml
+          for comp in core db exporter jobservice log nginx portal prepare redis registry registryctl trivy-adapter; do
+            case "${comp}" in
+              nginx) NAME="nginx-photon" ;;
+              registry) NAME="registry-photon" ;;
+              redis) NAME="redis-photon" ;;
+              trivy-adapter) NAME="trivy-adapter-photon" ;;
+              prepare) NAME="harbor-prepare" ;;
+              *) NAME="harbor-${comp}" ;;
+            esac
+            echo "| ${comp} | \`ghcr.io/dasomel/goharbor/${NAME}:${TAG}\` |" >> $GITHUB_STEP_SUMMARY
+          done
+```
+with:
+```yaml
+          for comp in core db exporter jobservice log nginx portal prepare redis valkey registry registryctl trivy-adapter; do
+            case "${comp}" in
+              nginx) NAME="nginx-photon" ;;
+              registry) NAME="registry-photon" ;;
+              redis) NAME="redis-photon" ;;
+              valkey) NAME="valkey-photon" ;;
+              trivy-adapter) NAME="trivy-adapter-photon" ;;
+              prepare) NAME="harbor-prepare" ;;
+              *) NAME="harbor-${comp}" ;;
+            esac
+            echo "| ${comp} | \`ghcr.io/dasomel/goharbor/${NAME}:${TAG}\` |" >> $GITHUB_STEP_SUMMARY
+          done
+```
+
+- [ ] **Step 6: Validate YAML syntax**
+
+Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/build-package.yml'))" && echo OK`
+Expected: `OK`
+
+- [ ] **Step 7: Verify the discovery logic locally against both a `redis` tree and a `valkey` tree**
+
+Run:
+```bash
+git show v2.15.1 --stat >/dev/null 2>&1  # sanity: tag exists locally
+for tag in v2.15.1 v2.15.2; do
+  echo "=== $tag ==="
+  git ls-tree -d --name-only "$tag" make/photon/ | while read -r d; do
+    name=$(basename "$d")
+    if git cat-file -e "$tag:make/photon/${name}/Dockerfile.base" 2>/dev/null; then
+      echo "$name"
+    fi
+  done | sort
+done
+```
+Expected:
+```
+=== v2.15.1 ===
+core
+db
+exporter
+jobservice
+log
+nginx
+portal
+prepare
+redis
+registry
+registryctl
+trivy-adapter
+=== v2.15.2 ===
+core
+db
+exporter
+jobservice
+log
+nginx
+portal
+prepare
+registry
+registryctl
+trivy-adapter
+valkey
+```
+(This uses `git ls-tree`/`git cat-file` instead of a real checkout, since it's simulating what the `discover-components` job's `ls`-based logic would find in each tree, without needing to actually check out each tag into the working directory.)
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add .github/workflows/build-package.yml
+git commit -m "fix(ci): dynamically discover buildable components instead of a hardcoded matrix
+
+Upstream renamed make/photon/redis to make/photon/valkey between v2.15.1
+and v2.15.2 (#23157), but build-package.yml's matrix was never updated —
+a pre-existing bug on main itself, since main's own source tree already
+has valkey, not redis. A single static matrix can't build both v2.15.0/
+v2.15.1 (redis) and v2.15.2+ (valkey) release_tag checkouts, so the
+matrix is now discovered at runtime from whichever source tree is
+actually checked out, self-adapting to this rename (and any future one)."
+```
+
+---
+
+### Task 13: Cancel `publish_release.yml` runs triggered by our own tag sync
+
+**Files:**
+- Modify: `.github/workflows/sync-release-tags.yml` (the push loop, right after a successful `git push`)
+
+**Interfaces:** none new — reads `${tag}` from the existing loop variable.
+
+**Why:** this fork's `publish_release.yml` already has a guard (`if: github.repository == 'goharbor/harbor'`) on `main` — but pushing a tag that points at an **upstream** commit makes GitHub evaluate the `on: push: tags: 'v*.*.*'` trigger match using **that commit's own copy** of `publish_release.yml`, not `main`'s. Confirmed directly: `git show v2.15.2:.github/workflows/publish_release.yml` has no guard at all (upstream doesn't need one — it IS `goharbor/harbor`). So every tag this fork syncs unavoidably fires upstream's unguarded `publish_release.yml`, which fails loudly (this fork has none of the AWS/DockerHub secrets it needs) — this exact failure pattern is already visible in this fork's run history for tags pushed before this feature existed (`v2.13.5-rc1`, `v2.13.5-rc2`, `v2.14.3-rc1`), so it's a longstanding nuisance this task also incidentally cleans up. Editing `main`'s copy of the guard cannot fix this, since the trigger-match uses the pushed commit's own tree — the only reliable fix is to cancel the resulting run after the fact.
+
+- [ ] **Step 1: Cancel the triggered `publish_release.yml` run right after pushing the tag**
+
+Find (inside the push loop, right after the `- pushed: ${tag}` summary line):
+```bash
+            if git fetch upstream "refs/tags/${tag}:refs/tags/${tag}" \
+               && git push origin "refs/tags/${tag}:refs/tags/${tag}"; then
+              echo "- pushed: ${tag}" >> "$GITHUB_STEP_SUMMARY"
+              echo "Triggering build-package.yml for ${tag}..."
+```
+Replace with:
+```bash
+            if git fetch upstream "refs/tags/${tag}:refs/tags/${tag}" \
+               && git push origin "refs/tags/${tag}:refs/tags/${tag}"; then
+              echo "- pushed: ${tag}" >> "$GITHUB_STEP_SUMMARY"
+
+              # publish_release.yml's on:push:tags trigger is evaluated using
+              # the pushed commit's OWN copy of that file — an upstream commit's
+              # copy has no repository guard (upstream doesn't need one), so
+              # this push unavoidably fires it. Cancel the resulting run rather
+              # than let it fail loudly for secrets this fork doesn't have.
+              for attempt in 1 2 3 4 5; do
+                release_run_id=$(gh run list --repo "${{ github.repository }}" --workflow publish_release.yml \
+                  --json databaseId,headBranch,createdAt \
+                  --jq "[.[] | select(.headBranch == \"${tag}\")] | sort_by(.createdAt) | reverse | .[0].databaseId" 2>/dev/null || echo "")
+                if [ -n "$release_run_id" ] && [ "$release_run_id" != "null" ]; then
+                  echo "Cancelling triggered publish_release.yml run ${release_run_id} for ${tag}..."
+                  gh run cancel "$release_run_id" --repo "${{ github.repository }}" || true
+                  break
+                fi
+                sleep 3
+              done
+
+              echo "Triggering build-package.yml for ${tag}..."
+```
+
+- [ ] **Step 2: Validate YAML syntax**
+
+Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/sync-release-tags.yml'))" && echo OK`
+Expected: `OK`
+
+- [ ] **Step 3: Verify the lookup query against real, already-existing failed runs (read-only, no cancellation)**
+
+Run:
+```bash
+gh run list --repo dasomel/harbor --workflow publish_release.yml --json databaseId,headBranch,createdAt \
+  --jq '[.[] | select(.headBranch == "v2.15.2")] | sort_by(.createdAt) | reverse | .[0].databaseId'
+```
+Expected: prints the numeric run ID of the already-completed (failed) `publish_release.yml` run for `v2.15.2` (confirms the lookup query shape is correct against real data — this run already finished, so nothing will actually be cancelled by this read, it's the same query the loop uses).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add .github/workflows/sync-release-tags.yml
+git commit -m "fix(ci): cancel publish_release.yml runs our own tag sync unavoidably triggers
+
+publish_release.yml's push:tags trigger match uses the pushed commit's own
+file content, not main's — an upstream commit's copy has no repository
+guard (upstream doesn't need one), so every synced tag fires it, and it
+fails loudly for AWS/DockerHub secrets this fork doesn't have. Cancel the
+resulting run instead of letting it fail noisily."
+```
