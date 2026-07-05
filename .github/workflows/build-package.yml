@@ -154,27 +154,43 @@ jobs:
             src/github.com/goharbor/harbor/harbor-online-installer-*.tgz
 
   # ========================================
+  # 1.5단계: 실제 체크아웃된 소스에서 빌드 가능한 컴포넌트 동적 탐지
+  # ========================================
+  discover-components:
+    runs-on: ubuntu-latest
+    outputs:
+      components: ${{ steps.discover.outputs.components }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+
+      - name: Discover buildable components
+        id: discover
+        run: |
+          set -euo pipefail
+          components=$(for d in make/photon/*/; do
+            name=$(basename "$d")
+            if [ -f "make/photon/${name}/Dockerfile.base" ]; then
+              echo "$name"
+            fi
+          done | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "Discovered components: ${components}"
+          echo "components=${components}" >> "$GITHUB_OUTPUT"
+
+  # ========================================
   # 2단계: Base 이미지 빌드 (Multi-platform)
   # ========================================
   build-base-images:
     runs-on: ubuntu-latest
-    needs: BUILD_PACKAGE
+    needs:
+      - BUILD_PACKAGE
+      - discover-components
     strategy:
       fail-fast: false
       matrix:
-        component:
-          - core
-          - db
-          - exporter
-          - jobservice
-          - log
-          - nginx
-          - portal
-          - prepare
-          - redis
-          - registry
-          - registryctl
-          - trivy-adapter
+        component: ${{ fromJson(needs.discover-components.outputs.components) }}
 
     permissions:
       contents: read
@@ -213,6 +229,7 @@ jobs:
             portal) DESC="Harbor Portal"; NAME="harbor-portal" ;;
             prepare) DESC="Harbor Prepare"; NAME="harbor-prepare" ;;
             redis) DESC="Harbor Redis"; NAME="redis-photon" ;;
+            valkey) DESC="Harbor Valkey"; NAME="valkey-photon" ;;
             registry) DESC="Harbor Registry"; NAME="registry-photon" ;;
             registryctl) DESC="Harbor Registry Controller"; NAME="harbor-registryctl" ;;
             trivy-adapter) DESC="Harbor Trivy Adapter"; NAME="trivy-adapter-photon" ;;
@@ -514,23 +531,12 @@ jobs:
       - compile-registry
       - compile-trivy-adapter
       - compile-exporter
+      - discover-components
 
     strategy:
       fail-fast: false
       matrix:
-        component:
-          - core
-          - db
-          - exporter
-          - jobservice
-          - log
-          - nginx
-          - portal
-          - prepare
-          - redis
-          - registry
-          - registryctl
-          - trivy-adapter
+        component: ${{ fromJson(needs.discover-components.outputs.components) }}
 
     permissions:
       contents: read
@@ -595,6 +601,7 @@ jobs:
             portal) DESC="Harbor Portal"; NAME="harbor-portal" ;;
             prepare) DESC="Harbor Prepare"; NAME="harbor-prepare" ;;
             redis) DESC="Harbor Redis"; NAME="redis-photon" ;;
+            valkey) DESC="Harbor Valkey"; NAME="valkey-photon" ;;
             registry) DESC="Harbor Registry"; NAME="registry-photon" ;;
             registryctl) DESC="Harbor Registry Controller"; NAME="harbor-registryctl" ;;
             trivy-adapter) DESC="Harbor Trivy Adapter"; NAME="trivy-adapter-photon" ;;
@@ -658,7 +665,7 @@ jobs:
 
       - name: Set packages to public
         run: |
-          COMPONENTS="harbor-core harbor-db harbor-exporter harbor-jobservice harbor-log nginx-photon harbor-portal harbor-prepare redis-photon registry-photon harbor-registryctl trivy-adapter-photon"
+          COMPONENTS="harbor-core harbor-db harbor-exporter harbor-jobservice harbor-log nginx-photon harbor-portal harbor-prepare redis-photon valkey-photon registry-photon harbor-registryctl trivy-adapter-photon"
           for pkg in $COMPONENTS; do
             echo "Setting goharbor/${pkg} to public..."
             curl -s -X PATCH \
@@ -691,11 +698,12 @@ jobs:
           echo "## Images Built (Multi-arch: amd64 + arm64)" >> $GITHUB_STEP_SUMMARY
           echo "| Component | Image |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
-          for comp in core db exporter jobservice log nginx portal prepare redis registry registryctl trivy-adapter; do
+          for comp in core db exporter jobservice log nginx portal prepare redis valkey registry registryctl trivy-adapter; do
             case "${comp}" in
               nginx) NAME="nginx-photon" ;;
               registry) NAME="registry-photon" ;;
               redis) NAME="redis-photon" ;;
+              valkey) NAME="valkey-photon" ;;
               trivy-adapter) NAME="trivy-adapter-photon" ;;
               prepare) NAME="harbor-prepare" ;;
               *) NAME="harbor-${comp}" ;;
