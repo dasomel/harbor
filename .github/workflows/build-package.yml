@@ -53,11 +53,11 @@ jobs:
           ref: ${{ inputs.release_tag || github.ref }}
       - name: Build Base Image
         if: |
-          github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'workflow_dispatch' && inputs.release_tag == '') ||
           contains(steps.changed-files.outputs.modified, 'Dockerfile.base') ||
           contains(steps.changed-files.outputs.modified, 'VERSION') ||
           contains(steps.changed-files.outputs.modified, '.buildbaselog') ||
-          github.ref == 'refs/heads/main'
+          (github.ref == 'refs/heads/main' && inputs.release_tag == '')
         run: |
           set -x
           echo "${{ secrets.DOCKER_HUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
