@@ -1176,4 +1176,89 @@ run of sync-release-tags.yml: this fork has zero GitHub Releases yet, so
 released_raw.txt was empty, grep matched nothing, and the whole step
 aborted before printing anything."
 ```
-Expected: a release titled `v2.15.1 (linux/amd64, linux/arm64)` with body text mentioning it was mirrored from `goharbor/harbor`.
+
+---
+
+### Task 11: Skip the legacy Docker-Hub "Build Base Image" step for `release_tag`-driven runs
+
+**Files:**
+- Modify: `.github/workflows/build-package.yml` (the `BUILD_PACKAGE` job's "Build Base Image" step's `if:` condition)
+
+**Interfaces:** none — this only narrows an existing `if:` condition; no new inputs/outputs.
+
+**Why:** the first live end-to-end run of the full chain (Task 8) found that all three `release_tag`-triggered `build-package.yml` runs failed within ~45 seconds, in the `BUILD_PACKAGE` job's "Build Base Image" step:
+
+```
++ echo ''
++ docker login -u '' --password-stdin
+username is empty
+##[error]Process completed with exit code 1.
+```
+
+This step's `if:` condition includes `github.event_name == 'workflow_dispatch'` as one of its OR-ed triggers — a condition written for upstream's original workflow, back when this repo's own history shows it already failing the same way on a plain `workflow_dispatch` run months ago (`gh run list` shows a 45s `failure` on `2026-01-31`, pre-dating this feature entirely). The step tries to `docker login` and push `goharbor/photon:5.0` to Docker Hub using `secrets.DOCKER_HUB_USERNAME`/`DOCKER_HUB_PASSWORD` — secrets this fork does not have configured (confirmed via the login step's own literal empty-string interpolation in the log). This is a pre-existing, out-of-scope issue, unrelated to the ARM64 sync feature — but our new `release_tag` `workflow_dispatch` path (Task 6) now reliably triggers it every single time, which fully blocks the feature this plan exists to deliver. This fork's actual multi-arch base images are built separately by the `build-base-images` job (pushing to `ghcr.io/dasomel/goharbor/harbor-*-base`, nothing to do with Docker Hub or this step), so skipping this step for our path does not affect the real build.
+
+The fix is scoped as narrowly as possible: only skip this step when the run was dispatched with a non-empty `release_tag`. A plain `workflow_dispatch` with no `release_tag` (e.g. an ordinary manual dev-build trigger) keeps its current (already broken, pre-existing, out-of-scope) behavior unchanged — fixing that generally is not this task's job.
+
+- [ ] **Step 1: Narrow the `if:` condition**
+
+Replace:
+```yaml
+      - name: Build Base Image
+        if: |
+          github.event_name == 'workflow_dispatch' ||
+          contains(steps.changed-files.outputs.modified, 'Dockerfile.base') ||
+          contains(steps.changed-files.outputs.modified, 'VERSION') ||
+          contains(steps.changed-files.outputs.modified, '.buildbaselog') ||
+          github.ref == 'refs/heads/main'
+```
+with:
+```yaml
+      - name: Build Base Image
+        if: |
+          (github.event_name == 'workflow_dispatch' && inputs.release_tag == '') ||
+          contains(steps.changed-files.outputs.modified, 'Dockerfile.base') ||
+          contains(steps.changed-files.outputs.modified, 'VERSION') ||
+          contains(steps.changed-files.outputs.modified, '.buildbaselog') ||
+          github.ref == 'refs/heads/main'
+```
+
+- [ ] **Step 2: Validate YAML syntax**
+
+Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/build-package.yml'))" && echo OK`
+Expected: `OK`
+
+- [ ] **Step 3: Confirm the condition logic by hand-tracing both cases**
+
+There is no local harness for evaluating GitHub Actions `if:` expressions, so trace through by hand and write the two cases into your report:
+1. `release_tag` set to a non-empty tag (our path): `inputs.release_tag == ''` is `false` → the first OR-term is `false`. If none of the other OR-terms are true either (they check file-diff/ref conditions unrelated to this trigger), the whole condition is `false` → step is skipped. Confirm the other four OR-terms are indeed independent of `release_tag`/`event_name` (they check `steps.changed-files.outputs.modified` and `github.ref`) so they don't accidentally become true for this path.
+2. Plain `workflow_dispatch` with no `release_tag` (existing behavior, e.g. dispatched via the GitHub UI with the input left blank, which defaults to `""` per Task 6's `default: ""`): `inputs.release_tag == ''` is `true` → first OR-term is `true` → step still runs, unchanged from today.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add .github/workflows/build-package.yml
+git commit -m "fix(ci): skip legacy Docker-Hub base-image push for release_tag-driven builds
+
+The 'Build Base Image' step tries to docker login + push goharbor/photon:5.0
+to Docker Hub, which this fork has no credentials for. Its if: condition
+already ran for any workflow_dispatch (a pre-existing, out-of-scope bug —
+this repo's own run history shows it failing the same way months before
+this feature existed), but our new release_tag workflow_dispatch path
+(added to trigger builds for synced upstream tags) now hits it every time,
+which blocked the entire ARM64 sync feature. This fork's real multi-arch
+base images are built separately by the build-base-images job against
+ghcr.io, so skipping this legacy step for release_tag runs doesn't affect
+the actual build."
+```
+
+- [ ] **Step 5: Re-trigger a live build and confirm it gets past this step**
+
+This is operational verification against the real repo, not a local test:
+```bash
+gh workflow run sync-release-tags.yml --repo dasomel/harbor -f dry_run=false
+```
+Wait for the triggered `build-package.yml` run(s) to reach the `build-base-images` / `compile-*` jobs (they'll take a while — this is a real multi-arch build). Confirm via:
+```bash
+gh run list --repo dasomel/harbor --workflow build-package.yml --limit 3 --json databaseId,status,conclusion
+```
+Expected: the run no longer fails within seconds — it should be `in_progress` for a meaningful duration (the real multi-arch build takes roughly an hour), not `completed`/`failure` almost immediately.
