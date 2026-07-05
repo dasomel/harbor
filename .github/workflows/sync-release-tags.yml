@@ -44,20 +44,20 @@ jobs:
 
           tmp_dir=$(mktemp -d)
           git ls-remote --tags upstream | awk '{print $2}' | sed 's#refs/tags/##; s/\^{}//' | sort -u > "$tmp_dir/upstream_raw.txt"
-          git ls-remote --tags origin   | awk '{print $2}' | sed 's#refs/tags/##; s/\^{}//' | sort -u > "$tmp_dir/origin_raw.txt"
+          gh release list --repo "${{ github.repository }}" --limit 1000 --json tagName -q '.[].tagName' | sort -u > "$tmp_dir/released_raw.txt"
 
           filter_ga_tags_min_version "$MIN_GA_VERSION" < "$tmp_dir/upstream_raw.txt" > "$tmp_dir/upstream_ga.txt"
-          filter_ga_tags_min_version "$MIN_GA_VERSION" < "$tmp_dir/origin_raw.txt"   > "$tmp_dir/origin_ga.txt"
+          filter_ga_tags_min_version "$MIN_GA_VERSION" < "$tmp_dir/released_raw.txt" > "$tmp_dir/released_ga.txt"
 
-          missing=$(diff_missing_tags "$tmp_dir/upstream_ga.txt" "$tmp_dir/origin_ga.txt")
+          missing=$(diff_missing_tags "$tmp_dir/upstream_ga.txt" "$tmp_dir/released_ga.txt")
 
           {
             echo "## Sync Release Tags"
             echo
             if [ -z "$missing" ]; then
-              echo "No missing GA tags (>= ${MIN_GA_VERSION}). Nothing to do."
+              echo "No GA tags (>= ${MIN_GA_VERSION}) without a completed Release. Nothing to do."
             else
-              echo "Missing GA tags (>= ${MIN_GA_VERSION}):"
+              echo "GA tags (>= ${MIN_GA_VERSION}) without a completed Release (will be (re-)triggered):"
               echo '```'
               echo "$missing"
               echo '```'
