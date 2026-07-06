@@ -2343,10 +2343,10 @@ A fixed bump to `node:22.22.3` would fix `v2.15.2` but break `v2.15.0`/`v2.15.1`
 
 At the top of the step's `run:` block (before the existing `if [ -f ... ]`), add:
 ```bash
-          node_image=$(grep -E '^NODEBUILDIMAGE=' Makefile | head -n1 | cut -d= -f2)
+          node_image=$(grep -E '^NODEBUILDIMAGE=' Makefile | head -n1 | cut -d= -f2 || true)
           echo "node_image=${node_image:-node:16.18.0}" >> "$GITHUB_OUTPUT"
 ```
-(Fallback `node:16.18.0` — today's hardcoded value — covers any hypothetical release whose Makefile lacks the variable, preserving current behavior in that case rather than passing an empty build-arg.)
+(Fallback `node:16.18.0` — today's hardcoded value — covers any hypothetical release whose Makefile lacks the variable, preserving current behavior in that case rather than passing an empty build-arg. The `|| true` is load-bearing, not decorative: GitHub Actions' default shell is `bash -eo pipefail`, and a bare `var=$(pipeline)` assignment propagates the pipeline's exit status — so `grep` matching nothing would abort the whole step BEFORE the `${node_image:-...}` fallback ever runs, defeating exactly the case the fallback exists for. Empirically confirmed during review with `bash -e -o pipefail`: without `|| true`, neither subsequent line executes. Same bug class as Task 10's grep fix.)
 
 - [ ] **Step 2: Use it in the existing build step's `build-args`**
 
