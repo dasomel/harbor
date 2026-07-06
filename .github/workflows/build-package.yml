@@ -269,7 +269,14 @@ jobs:
       - name: Generate swagger APIs (for core)
         if: matrix.component == 'core'
         run: |
-          SWAGGER_VERSION=v0.31.0
+          # Use the go-swagger version the checked-out source pins in its Makefile:
+          # tools/swagger/templates are written for that exact version, and a
+          # mismatched generator emits harbor_api.go handler signatures that don't
+          # compile against the operations packages (e.g. principal *interface{}
+          # vs interface{}). Release tags may pin a different version than main.
+          SWAGGER_VERSION=$(sed -n 's/^SWAGGER_VERSION=//p' Makefile | head -1)
+          SWAGGER_VERSION=${SWAGGER_VERSION:-v0.31.0}
+          echo "Using go-swagger ${SWAGGER_VERSION} (from Makefile)"
           rm -rf src/server/v2.0/models src/server/v2.0/restapi
           mkdir -p src/server/v2.0
           docker run --rm \
