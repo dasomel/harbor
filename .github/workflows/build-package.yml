@@ -312,7 +312,7 @@ jobs:
       - name: Generate swagger APIs (for core)
         if: matrix.component == 'core'
         run: |
-          SWAGGER_VERSION=v0.31.0
+          SWAGGER_VERSION=v0.33.1
           rm -rf src/server/v2.0/models src/server/v2.0/restapi
           mkdir -p src/server/v2.0
           docker run --rm \
