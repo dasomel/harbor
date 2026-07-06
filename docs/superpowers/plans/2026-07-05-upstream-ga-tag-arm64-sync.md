@@ -2320,3 +2320,89 @@ Wait for the triggered `build-package.yml` runs. Expected outcomes:
 - `v2.15.2` run: `build-final-images` succeeds for `core`, `jobservice`, `registryctl`, `registry`, `trivy-adapter` (in addition to the already-passing `valkey`/`db`/`nginx`/`log`); `exporter` is skipped (not failed); `portal` still fails (known limitation #2).
 - Confirm a merged multi-arch manifest: `docker buildx imagetools inspect ghcr.io/dasomel/goharbor/harbor-core:v2.15.2` shows both `linux/amd64` and `linux/arm64`.
 - `v2.15.0`/`v2.15.1` runs: same expectations for the fixable components (`build-base-images (redis)` still fails on those two — the Photon repo removed the `redis` package upstream; external, unfixable).
+
+**Result (verified live 2026-07-06):** exactly as expected — `v2.15.2` succeeded for all five legacy components with correctly merged amd64+arm64 manifests (`harbor-core:v2.15.2`, `registry-photon:v2.15.2` inspected), `exporter` skipped cleanly (all build/sign steps `skipped`, job green), `portal` failed as predicted. This surfaced a consequence: portal's failure makes the `build-final-images` job fail overall, so `create-github-release` (which `needs:` it) is **skipped** — no Release is created, and Task 9's Release-existence idempotency will re-trigger the same tag every scheduled run, forever. Fixing portal (Task 20) resolves both.
+
+---
+
+### Task 20: Read the portal `NODE` build image from the release's own Makefile (fixes portal + unblocks Release creation)
+
+**Files:**
+- Modify: `.github/workflows/build-package.yml` (`build-final-images` job: extend the "Determine Dockerfile" step with a `node_image` output; use it in the existing build step's `build-args`)
+
+**Interfaces:**
+- Produces: `steps.dockerfile.outputs.node_image`, consumed by the same job's "Build and push final image" step.
+
+**Why:** live verification of Task 19 confirmed `build-final-images (portal)` still fails with `ng build ... exit code: 3`. Root cause found — the exact same stale-hardcoded-version pattern as Task 16's swagger fix, but with a twist that mandates dynamic detection rather than a bump: the workflow passes `NODE=node:16.18.0` as a hardcoded build-arg, while each release's own `Makefile` (the authoritative source) specifies what Node the portal build actually needs, and **it genuinely varies by release**:
+- `v2.15.0`, `v2.15.1`: `NODEBUILDIMAGE=node:16.18.0` (current hardcoded value is right for these)
+- `v2.15.2`, current `main`: `NODEBUILDIMAGE=node:22.22.3` (Angular v21 toolchain — cannot build on Node 16, hence exit code 3)
+
+A fixed bump to `node:22.22.3` would fix `v2.15.2` but break `v2.15.0`/`v2.15.1`'s portal. Reading `NODEBUILDIMAGE` from the checked-out source's own `Makefile` at runtime self-adapts per release — the same established pattern as Tasks 12/14/18. Beyond portal itself, this fix has a systemic payoff: with portal green, `build-final-images` succeeds overall, so `create-github-release` actually runs, the Release gets created, and Task 9's idempotency stops re-triggering the tag daily.
+
+- [ ] **Step 1: Emit `node_image` from the "Determine Dockerfile" step**
+
+At the top of the step's `run:` block (before the existing `if [ -f ... ]`), add:
+```bash
+          node_image=$(grep -E '^NODEBUILDIMAGE=' Makefile | head -n1 | cut -d= -f2)
+          echo "node_image=${node_image:-node:16.18.0}" >> "$GITHUB_OUTPUT"
+```
+(Fallback `node:16.18.0` — today's hardcoded value — covers any hypothetical release whose Makefile lacks the variable, preserving current behavior in that case rather than passing an empty build-arg.)
+
+- [ ] **Step 2: Use it in the existing build step's `build-args`**
+
+Replace:
+```yaml
+            NODE=node:16.18.0
+```
+with:
+```yaml
+            NODE=${{ steps.dockerfile.outputs.node_image }}
+```
+
+- [ ] **Step 3: Validate YAML syntax**
+
+Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/build-package.yml'))" && echo OK`
+Expected: `OK`
+
+- [ ] **Step 4: Verify the extraction logic against all relevant trees**
+
+Run:
+```bash
+for ref in v2.15.0 v2.15.1 v2.15.2; do
+  echo -n "$ref -> "
+  git show "$ref:Makefile" | grep -E '^NODEBUILDIMAGE=' | head -n1 | cut -d= -f2
+done
+echo -n "main -> "
+grep -E '^NODEBUILDIMAGE=' Makefile | head -n1 | cut -d= -f2
+```
+Expected:
+```
+v2.15.0 -> node:16.18.0
+v2.15.1 -> node:16.18.0
+v2.15.2 -> node:22.22.3
+main -> node:22.22.3
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add .github/workflows/build-package.yml
+git commit -m "fix(ci): read portal NODE build image from the release's own Makefile
+
+build-final-images hardcoded NODE=node:16.18.0, but the required Node
+genuinely varies by release (v2.15.0/v2.15.1 need node:16.18.0;
+v2.15.2 and main need node:22.22.3 for the Angular v21 toolchain —
+ng build exits 3 on Node 16). Reading NODEBUILDIMAGE from the checked-out
+source's own Makefile self-adapts per release, same pattern as the
+component-discovery/GOTOOLCHAIN/Dockerfile.multiarch fixes. With portal
+green, build-final-images succeeds overall, so create-github-release
+finally runs and the Release-existence idempotency stops re-triggering
+completed tags daily."
+```
+
+- [ ] **Step 6: Live end-to-end verification**
+
+Push and re-run the sync (`dry_run=false`). Expected for the `v2.15.2` run:
+- `build-final-images (portal)`: **success** (first time ever)
+- `build-final-images` overall: success → `create-github-release` runs → `gh release view v2.15.2 --repo dasomel/harbor` shows a Release titled `v2.15.2 (linux/amd64, linux/arm64)`
+- Subsequent scheduled syncs no longer re-trigger `v2.15.2` (its Release now exists).
