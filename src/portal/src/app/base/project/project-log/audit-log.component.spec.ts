@@ -171,8 +171,15 @@ describe('ProjectAuditLogComponent', () => {
         }
         expect(component.totalRecordCount).toBe(18);
         fixture.detectChanges();
-        const el: HTMLButtonElement =
+        // The pagination controls render asynchronously after the data lands, so
+        // poll a few change-detection cycles for the next-page button too.
+        let el: HTMLButtonElement =
             fixture.nativeElement.querySelector('.pagination-next');
+        for (let i = 0; i < 20 && !el; i++) {
+            fixture.detectChanges();
+            await fixture.whenStable();
+            el = fixture.nativeElement.querySelector('.pagination-next');
+        }
         expect(el).toBeTruthy();
         el.click();
         fixture.detectChanges();

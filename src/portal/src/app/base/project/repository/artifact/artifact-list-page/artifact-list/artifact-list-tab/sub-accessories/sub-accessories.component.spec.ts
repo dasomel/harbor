@@ -116,8 +116,17 @@ describe('SubAccessoriesComponent', () => {
 
     it('should render next page', async () => {
         await fixture.whenStable();
-        const nextPageButton: HTMLButtonElement =
+        // The datagrid's pagination controls render asynchronously; poll a few
+        // change-detection cycles so the button is present before clicking.
+        let nextPageButton: HTMLButtonElement =
             fixture.nativeElement.querySelector('.pagination-next');
+        for (let i = 0; i < 20 && !nextPageButton; i++) {
+            fixture.detectChanges();
+            await fixture.whenStable();
+            nextPageButton =
+                fixture.nativeElement.querySelector('.pagination-next');
+        }
+        expect(nextPageButton).toBeTruthy();
         nextPageButton.click();
         fixture.detectChanges();
         await fixture.whenStable();
