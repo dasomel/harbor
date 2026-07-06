@@ -1990,3 +1990,92 @@ via actions/setup-go, so installing and running the swagger CLI natively
 (go install .../swagger@v0.33.1) avoids needing a Go toolchain baked into
 that container image."
 ```
+
+---
+
+### Task 18: Dynamically detect `Dockerfile.multiarch` instead of assuming it by component name
+
+**Files:**
+- Modify: `.github/workflows/build-package.yml` (`build-final-images` job: add a step, change the "Build and push final image" step's `file:` input)
+
+**Interfaces:**
+- Produces: `steps.dockerfile.outputs.path`, consumed by the same job's "Build and push final image" step (`file:` input).
+
+**Why:** live end-to-end testing (after Task 17) got further than ever — `build-base-images`, `compile-binaries`, `compile-registry`, `compile-exporter`, `compile-trivy-adapter` all succeeded for `v2.15.2` — but `build-final-images` then failed for `core`, `registry`, `jobservice`, `portal`, `exporter`, `registryctl` with:
+```
+ERROR: failed to build: failed to solve: failed to read dockerfile: open Dockerfile.multiarch: no such file or directory
+```
+`build-package.yml` picks the Dockerfile via a hardcoded component-name list:
+```yaml
+file: ./make/photon/${{ matrix.component }}/Dockerfile${{ contains(fromJSON('["core", "jobservice", "registryctl", "registry", "trivy-adapter", "exporter"]'), matrix.component) && '.multiarch' || '' }}
+```
+Confirmed directly: `make/photon/core/` on current `main` has `Dockerfile`, `Dockerfile.base`, AND `Dockerfile.multiarch`, but the same directory in the `v2.15.2` tree has only `Dockerfile` and `Dockerfile.base` — `Dockerfile.multiarch` was added to these components sometime after `v2.15.2` was released. This is the exact same shape of problem Task 12 (redis/valkey) and Task 14 (Go toolchain) already fixed for other parts of the pipeline: a hardcoded assumption about `main`'s current file layout breaks when checking out an older `release_tag`'s tree. The fix follows the same self-adapting philosophy — check what's actually present in the checked-out source at runtime instead of assuming based on component name.
+
+- [ ] **Step 1: Add a "Determine Dockerfile" step before "Build and push final image"**
+
+Insert this new step immediately before the existing `- name: Build and push final image` step in the `build-final-images` job:
+
+```yaml
+      - name: Determine Dockerfile
+        id: dockerfile
+        run: |
+          if [ -f "make/photon/${{ matrix.component }}/Dockerfile.multiarch" ]; then
+            echo "path=make/photon/${{ matrix.component }}/Dockerfile.multiarch" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=make/photon/${{ matrix.component }}/Dockerfile" >> "$GITHUB_OUTPUT"
+          fi
+```
+
+- [ ] **Step 2: Consume the new output in "Build and push final image"**
+
+Replace:
+```yaml
+          file: ./make/photon/${{ matrix.component }}/Dockerfile${{ contains(fromJSON('["core", "jobservice", "registryctl", "registry", "trivy-adapter", "exporter"]'), matrix.component) && '.multiarch' || '' }}
+```
+with:
+```yaml
+          file: ${{ steps.dockerfile.outputs.path }}
+```
+
+- [ ] **Step 3: Validate YAML syntax**
+
+Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/build-package.yml'))" && echo OK`
+Expected: `OK`
+
+- [ ] **Step 4: Verify the detection logic against both a pre- and post-rename tree, without needing a real checkout**
+
+Run:
+```bash
+for tag in v2.15.2 main; do
+  echo "=== $tag ==="
+  for comp in core jobservice registryctl registry trivy-adapter exporter nginx db prepare log portal; do
+    if [ "$tag" = "main" ]; then
+      f="make/photon/${comp}/Dockerfile.multiarch"
+      [ -f "$f" ] && echo "$comp -> Dockerfile.multiarch" || echo "$comp -> Dockerfile"
+    else
+      if git cat-file -e "$tag:make/photon/${comp}/Dockerfile.multiarch" 2>/dev/null; then
+        echo "$comp -> Dockerfile.multiarch"
+      else
+        echo "$comp -> Dockerfile"
+      fi
+    fi
+  done
+done
+```
+Expected: for `v2.15.2`, every component resolves to plain `Dockerfile` (none have `.multiarch` yet); for `main` (the working tree), `core`, `jobservice`, `registryctl`, `registry`, `trivy-adapter`, `exporter` resolve to `Dockerfile.multiarch` and the rest resolve to plain `Dockerfile` — matching the OLD hardcoded list exactly for `main`, and correctly diverging for `v2.15.2`. This confirms the new runtime-detection logic reproduces today's intended behavior on `main` while adapting correctly for older trees.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add .github/workflows/build-package.yml
+git commit -m "fix(ci): detect Dockerfile.multiarch at runtime instead of assuming it by component name
+
+build-final-images hardcoded which components use Dockerfile.multiarch
+vs plain Dockerfile, based on main's current layout. v2.15.2's tree
+(and presumably earlier releases) doesn't have Dockerfile.multiarch at
+all for any component yet — it was added to main sometime after that
+release. Checking for the file's actual presence in the checked-out
+source, rather than assuming based on a hardcoded component list,
+self-adapts the same way Task 12's component discovery and Task 14's
+GOTOOLCHAIN=auto already do for other parts of this pipeline."
+```
