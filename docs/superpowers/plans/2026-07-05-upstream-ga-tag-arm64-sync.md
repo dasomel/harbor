@@ -2082,20 +2082,241 @@ GOTOOLCHAIN=auto already do for other parts of this pipeline."
 
 ---
 
-## Known Limitations (documented, not fixed — stopped here by request)
+## Known Limitations
 
-After Task 18, live end-to-end testing on `v2.15.2` showed the full chain (sync → tag push → `workflow_dispatch` trigger → `BUILD_PACKAGE` → `discover-components` → `build-base-images` → `compile-*` → `build-final-images`) genuinely working end-to-end for 4 of 12 components (`valkey`, `db`, `nginx`, `log`) and the core mechanism (everything through Tasks 1-13) is fully verified. Two further issues were found and are **documented here, intentionally left unfixed** for a future session:
+After Task 18, live end-to-end testing on `v2.15.2` showed the full chain (sync → tag push → `workflow_dispatch` trigger → `BUILD_PACKAGE` → `discover-components` → `build-base-images` → `compile-*` → `build-final-images`) genuinely working end-to-end for 4 of 12 components (`valkey`, `db`, `nginx`, `log`) and the core mechanism (everything through Tasks 1-13) is fully verified.
 
-1. **Pre-`Dockerfile.multiarch` releases (`v2.15.0`, `v2.15.1`, `v2.15.2`, and presumably others before `Dockerfile.multiarch` was introduced upstream) fail `build-final-images` for `core`, `jobservice`, `registryctl`, `registry`, `exporter`** (and likely `trivy-adapter`) with:
-   ```
-   failed to calculate checksum of ref ...: "/make/photon/core/harbor_core": not found
-   ```
-   Task 18 correctly picks the plain (non-multiarch) `Dockerfile` for these releases, but that older Dockerfile expects a single pre-built binary directly at `make/photon/<component>/<binary_name>` (the pre-multiarch convention), while this fork's `compile-binaries`/`compile-registry` jobs always produce per-architecture binaries at `make/photon/<component>/binary/<arch>/<binary_name>` (the convention `Dockerfile.multiarch` expects). These two conventions are incompatible, and bridging them (e.g., copying/symlinking the compiled binary to both locations, or detecting which convention a given Dockerfile expects) is a larger task than a version-string or matrix-membership fix — it wasn't attempted here.
+**Update:** the pre-`Dockerfile.multiarch` binary-layout incompatibility (formerly limitation #1 here) is now addressed by **Task 19** below for `core`, `jobservice`, `registryctl`, `registry`, and `trivy-adapter`. Two limitations remain, intentionally left unfixed:
+
+1. **`exporter` on pre-`Dockerfile.multiarch` releases cannot produce a real arm64 image at all.** Its plain `Dockerfile` is a multi-stage build that compiles the binary *inside* the image build with `ENV GOARCH=amd64` hardcoded (and requires a `build_image` build-arg this pipeline never provided). No amount of workflow-side work can change what that Dockerfile bakes in — producing arm64 would require modifying the upstream release's own source, which violates this project's build-the-exact-upstream-source principle. Task 19 explicitly **skips** `exporter` in legacy mode (no exporter image for pre-multiarch releases) rather than publishing a mislabeled amd64-only binary in an arm64 manifest slot.
 
 2. **`build-final-images (portal)` fails independently** with:
    ```
    process "/bin/sh -c node ... 'node_modules/@angular/cli/bin/ng' build --configuration production" did not complete successfully: exit code: 3
    ```
-   This is unrelated to the binary-path issue above — an Angular/Node build failure inside the portal's own Dockerfile — and was not investigated further.
+   This is unrelated to the binary-path issue — an Angular/Node build failure inside the portal's own Dockerfile — and was not investigated further.
 
-Both are scoped as follow-up work, not part of this plan's original goal (which is fully met: the sync → build → release mechanism works, verified live, for every component whose build process is compatible with this fork's current binary-artifact layout).
+---
+
+### Task 19: Per-arch legacy builds + manifest merge for pre-`Dockerfile.multiarch` releases
+
+**Files:**
+- Modify: `.github/workflows/build-package.yml` (`build-final-images` job: extend the "Determine Dockerfile" step's outputs, add one conditional artifact-download step, gate the existing build/sign steps, add one new legacy-build step)
+
+**Interfaces:**
+- Produces: `steps.dockerfile.outputs.legacy` and `steps.dockerfile.outputs.skip` (in addition to the existing `path`), consumed by the same job's subsequent steps.
+
+**Why:** live end-to-end testing after Task 18 confirmed the plain (pre-multiarch) Dockerfiles fail with e.g. `"/make/photon/core/harbor_core": not found`. The two Dockerfile generations use incompatible binary conventions, confirmed by direct comparison of `v2.15.2`'s trees against `main`:
+
+| component | plain Dockerfile expects | our pipeline produces |
+|---|---|---|
+| core | `make/photon/core/harbor_core` | `make/photon/core/binary/{amd64,arm64}/harbor_core` |
+| jobservice | `make/photon/jobservice/harbor_jobservice` | `.../binary/{arch}/harbor_jobservice` |
+| registryctl | `make/photon/registryctl/harbor_registryctl` **AND** `make/photon/registry/binary/registry` | `.../binary/{arch}/harbor_registryctl` (registry binary is a separate artifact this matrix leg never downloads) |
+| registry | `make/photon/registry/binary/registry` | `.../binary/{arch}/registry` |
+| trivy-adapter | `make/photon/trivy-adapter/binary/{trivy,scanner-trivy}` | `.../binary/{arch}/{trivy,scanner-trivy}` |
+| exporter | (self-builds in-image, `ENV GOARCH=amd64` hardcoded, needs `build_image` arg) | n/a — **unfixable without modifying upstream source; skipped** |
+
+The plain Dockerfiles have no `TARGETARCH` concept, so a single `--platform linux/amd64,linux/arm64` build can never work with them. The fix builds **each architecture separately** — place that arch's binary at the legacy path, build and push a single-platform image tagged `<version>-<arch>` — then merges the two into one multi-arch manifest with `docker buildx imagetools create`, the same pattern upstream's own `publish_release.yml` uses (`tools/release/release_utils.sh`'s `publishImages` + the "Create multi-arch manifests" step). Components whose plain Dockerfile copies no compiled binary (`db`, `nginx`, `log`, `prepare`, `redis`, `valkey`, `portal`) already build fine multi-platform through the existing step and are untouched by this task.
+
+- [ ] **Step 1: Extend the "Determine Dockerfile" step with `legacy` and `skip` outputs**
+
+Replace:
+```yaml
+      - name: Determine Dockerfile
+        id: dockerfile
+        run: |
+          if [ -f "make/photon/${{ matrix.component }}/Dockerfile.multiarch" ]; then
+            echo "path=make/photon/${{ matrix.component }}/Dockerfile.multiarch" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=make/photon/${{ matrix.component }}/Dockerfile" >> "$GITHUB_OUTPUT"
+          fi
+```
+with:
+```yaml
+      - name: Determine Dockerfile
+        id: dockerfile
+        run: |
+          if [ -f "make/photon/${{ matrix.component }}/Dockerfile.multiarch" ]; then
+            echo "path=make/photon/${{ matrix.component }}/Dockerfile.multiarch" >> "$GITHUB_OUTPUT"
+            echo "legacy=false" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=make/photon/${{ matrix.component }}/Dockerfile" >> "$GITHUB_OUTPUT"
+            case "${{ matrix.component }}" in
+              core|jobservice|registryctl|registry|trivy-adapter)
+                # Pre-multiarch Dockerfile expecting externally-compiled binaries at
+                # fixed single-arch paths — handled by the per-arch legacy build below.
+                echo "legacy=true" >> "$GITHUB_OUTPUT"
+                echo "skip=false" >> "$GITHUB_OUTPUT"
+                ;;
+              exporter)
+                # Pre-multiarch exporter self-builds in-image with GOARCH=amd64
+                # hardcoded and needs a build_image arg this pipeline doesn't
+                # provide — a real arm64 image is impossible without modifying
+                # upstream source. Skip rather than publish a broken image.
+                echo "legacy=false" >> "$GITHUB_OUTPUT"
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                ;;
+              *)
+                # Plain Dockerfile with no compiled-binary COPY — multi-platform
+                # build works as-is through the normal step.
+                echo "legacy=false" >> "$GITHUB_OUTPUT"
+                echo "skip=false" >> "$GITHUB_OUTPUT"
+                ;;
+            esac
+          fi
+```
+
+- [ ] **Step 2: Add a conditional download of the registry binary for registryctl's legacy build**
+
+Insert immediately after the "Determine Dockerfile" step (registryctl's plain Dockerfile also copies `make/photon/registry/binary/registry`, but this matrix leg only downloads `pkg-binary-registryctl`):
+```yaml
+      - name: Download registry binary for registryctl (legacy layout)
+        if: matrix.component == 'registryctl' && steps.dockerfile.outputs.legacy == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: pkg-binary-registry
+          path: make/photon/registry/binary/
+```
+
+- [ ] **Step 3: Gate the existing multiarch build step**
+
+Change the existing step's header from:
+```yaml
+      - name: Build and push final image
+        uses: docker/build-push-action@v6
+```
+to:
+```yaml
+      - name: Build and push final image
+        if: steps.dockerfile.outputs.legacy != 'true' && steps.dockerfile.outputs.skip != 'true'
+        uses: docker/build-push-action@v6
+```
+(everything under `with:` stays untouched).
+
+- [ ] **Step 4: Add the legacy per-arch build step**
+
+Insert immediately after the (now-gated) "Build and push final image" step:
+```yaml
+      - name: Build and push final image (legacy per-arch)
+        if: steps.dockerfile.outputs.legacy == 'true'
+        env:
+          IMAGE: ghcr.io/dasomel/goharbor/${{ steps.info.outputs.image_name }}
+          TAG: ${{ needs.BUILD_PACKAGE.outputs.version_tag }}
+        run: |
+          set -euo pipefail
+          # Pre-multiarch Dockerfiles have no TARGETARCH concept: they COPY a
+          # single binary from a fixed path. Build each architecture separately
+          # (staging that arch's binary at the legacy path first), then merge
+          # the per-arch images into one multi-arch manifest — the same pattern
+          # upstream's publish_release.yml uses.
+          for arch in amd64 arm64; do
+            case "${{ matrix.component }}" in
+              core)
+                cp "make/photon/core/binary/${arch}/harbor_core" "make/photon/core/harbor_core"
+                chmod +x "make/photon/core/harbor_core"
+                ;;
+              jobservice)
+                cp "make/photon/jobservice/binary/${arch}/harbor_jobservice" "make/photon/jobservice/harbor_jobservice"
+                chmod +x "make/photon/jobservice/harbor_jobservice"
+                ;;
+              registry)
+                cp "make/photon/registry/binary/${arch}/registry" "make/photon/registry/binary/registry"
+                chmod +x "make/photon/registry/binary/registry"
+                ;;
+              registryctl)
+                cp "make/photon/registryctl/binary/${arch}/harbor_registryctl" "make/photon/registryctl/harbor_registryctl"
+                cp "make/photon/registry/binary/${arch}/registry" "make/photon/registry/binary/registry"
+                chmod +x "make/photon/registryctl/harbor_registryctl" "make/photon/registry/binary/registry"
+                ;;
+              trivy-adapter)
+                cp "make/photon/trivy-adapter/binary/${arch}/trivy" "make/photon/trivy-adapter/binary/trivy"
+                cp "make/photon/trivy-adapter/binary/${arch}/scanner-trivy" "make/photon/trivy-adapter/binary/scanner-trivy"
+                chmod +x "make/photon/trivy-adapter/binary/trivy" "make/photon/trivy-adapter/binary/scanner-trivy"
+                ;;
+            esac
+            docker buildx build \
+              --platform "linux/${arch}" \
+              -f "${{ steps.dockerfile.outputs.path }}" \
+              --build-arg harbor_base_image_version="${TAG}" \
+              --build-arg harbor_base_namespace=ghcr.io/dasomel/goharbor \
+              --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+              --label "org.opencontainers.image.revision=${{ github.sha }}" \
+              --label "org.opencontainers.image.version=${TAG}" \
+              --provenance=false \
+              -t "${IMAGE}:${TAG}-${arch}" \
+              --push \
+              .
+          done
+          docker buildx imagetools create -t "${IMAGE}:${TAG}" "${IMAGE}:${TAG}-amd64" "${IMAGE}:${TAG}-arm64"
+          docker buildx imagetools create -t "${IMAGE}:latest" "${IMAGE}:${TAG}-amd64" "${IMAGE}:${TAG}-arm64"
+```
+(No `sbom:`/`provenance: true` equivalents here — those attestations are a docker/build-push-action nicety, and single-arch legacy builds keep the script simple; `--provenance=false` avoids the wrapper manifest that would complicate `imagetools create`.)
+
+- [ ] **Step 5: Gate the cosign sign step on `skip`**
+
+Change:
+```yaml
+      - name: Sign final image with Cosign
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+```
+to:
+```yaml
+      - name: Sign final image with Cosign
+        if: steps.dockerfile.outputs.skip != 'true'
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+```
+(Signing works unchanged for legacy builds — the merged `${TAG}`/`latest` manifests exist by the time it runs. Only the exporter-skip case, where no image was pushed at all, must not attempt to sign.)
+
+- [ ] **Step 6: Validate YAML syntax**
+
+Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/build-package.yml'))" && echo OK`
+Expected: `OK`
+
+- [ ] **Step 7: Statically verify the gating logic and binary-path mapping**
+
+Run:
+```bash
+# Exactly one legacy build step, gated on legacy==true:
+grep -c "Build and push final image (legacy per-arch)" .github/workflows/build-package.yml   # expect 1
+# The original build step is now gated:
+grep -B1 "uses: docker/build-push-action@v6" .github/workflows/build-package.yml | grep -c "steps.dockerfile.outputs.legacy != 'true'"   # expect 1 in build-final-images (build-base-images' usage has no such gate — confirm it was NOT touched)
+# Legacy-path staging targets match what each plain Dockerfile actually COPYs (against the real v2.15.2 tree):
+for comp in core jobservice registryctl registry trivy-adapter; do
+  echo "=== $comp ==="
+  git show "v2.15.2:make/photon/${comp}/Dockerfile" | grep "^COPY" | grep -v "entrypoint\|install_cert\|start.sh\|views\|migrations\|icons\|versions\|redis.conf"
+done
+```
+Expected for the last loop: each component's binary `COPY` lines reference exactly the destination paths the Step 4 `case` block stages (e.g. `./make/photon/core/harbor_core` for core, `./make/photon/registry/binary/registry` for registry AND registryctl, `./make/photon/trivy-adapter/binary/trivy` + `.../scanner-trivy` for trivy-adapter).
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add .github/workflows/build-package.yml
+git commit -m "fix(ci): per-arch legacy builds for pre-Dockerfile.multiarch releases
+
+Pre-multiarch plain Dockerfiles COPY a single externally-compiled binary
+from a fixed path with no TARGETARCH concept, so one multi-platform build
+can never satisfy them. For core/jobservice/registryctl/registry/
+trivy-adapter, build each architecture separately (staging that arch's
+binary at the legacy path first) and merge the results into one
+multi-arch manifest via buildx imagetools create — the same pattern
+upstream's publish_release.yml uses. exporter is skipped in legacy mode:
+its plain Dockerfile self-builds in-image with GOARCH=amd64 hardcoded,
+so a real arm64 image is impossible without modifying upstream source."
+```
+
+- [ ] **Step 9: Live end-to-end verification**
+
+Push to `origin/main`, then re-run the sync:
+```bash
+git push origin main
+gh workflow run sync-release-tags.yml --repo dasomel/harbor -f dry_run=false
+```
+Wait for the triggered `build-package.yml` runs. Expected outcomes:
+- `v2.15.2` run: `build-final-images` succeeds for `core`, `jobservice`, `registryctl`, `registry`, `trivy-adapter` (in addition to the already-passing `valkey`/`db`/`nginx`/`log`); `exporter` is skipped (not failed); `portal` still fails (known limitation #2).
+- Confirm a merged multi-arch manifest: `docker buildx imagetools inspect ghcr.io/dasomel/goharbor/harbor-core:v2.15.2` shows both `linux/amd64` and `linux/arm64`.
+- `v2.15.0`/`v2.15.1` runs: same expectations for the fixable components (`build-base-images (redis)` still fails on those two — the Photon repo removed the `redis` package upstream; external, unfixable).
