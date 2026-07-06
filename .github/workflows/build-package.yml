@@ -616,7 +616,7 @@ jobs:
       - name: Determine Dockerfile
         id: dockerfile
         run: |
-          node_image=$(grep -E '^NODEBUILDIMAGE=' Makefile | head -n1 | cut -d= -f2)
+          node_image=$(grep -E '^NODEBUILDIMAGE=' Makefile | head -n1 | cut -d= -f2 || true)
           echo "node_image=${node_image:-node:16.18.0}" >> "$GITHUB_OUTPUT"
           if [ -f "make/photon/${{ matrix.component }}/Dockerfile.multiarch" ]; then
             echo "path=make/photon/${{ matrix.component }}/Dockerfile.multiarch" >> "$GITHUB_OUTPUT"
