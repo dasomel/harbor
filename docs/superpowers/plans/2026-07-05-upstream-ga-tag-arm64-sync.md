@@ -2079,3 +2079,23 @@ source, rather than assuming based on a hardcoded component list,
 self-adapts the same way Task 12's component discovery and Task 14's
 GOTOOLCHAIN=auto already do for other parts of this pipeline."
 ```
+
+---
+
+## Known Limitations (documented, not fixed — stopped here by request)
+
+After Task 18, live end-to-end testing on `v2.15.2` showed the full chain (sync → tag push → `workflow_dispatch` trigger → `BUILD_PACKAGE` → `discover-components` → `build-base-images` → `compile-*` → `build-final-images`) genuinely working end-to-end for 4 of 12 components (`valkey`, `db`, `nginx`, `log`) and the core mechanism (everything through Tasks 1-13) is fully verified. Two further issues were found and are **documented here, intentionally left unfixed** for a future session:
+
+1. **Pre-`Dockerfile.multiarch` releases (`v2.15.0`, `v2.15.1`, `v2.15.2`, and presumably others before `Dockerfile.multiarch` was introduced upstream) fail `build-final-images` for `core`, `jobservice`, `registryctl`, `registry`, `exporter`** (and likely `trivy-adapter`) with:
+   ```
+   failed to calculate checksum of ref ...: "/make/photon/core/harbor_core": not found
+   ```
+   Task 18 correctly picks the plain (non-multiarch) `Dockerfile` for these releases, but that older Dockerfile expects a single pre-built binary directly at `make/photon/<component>/<binary_name>` (the pre-multiarch convention), while this fork's `compile-binaries`/`compile-registry` jobs always produce per-architecture binaries at `make/photon/<component>/binary/<arch>/<binary_name>` (the convention `Dockerfile.multiarch` expects). These two conventions are incompatible, and bridging them (e.g., copying/symlinking the compiled binary to both locations, or detecting which convention a given Dockerfile expects) is a larger task than a version-string or matrix-membership fix — it wasn't attempted here.
+
+2. **`build-final-images (portal)` fails independently** with:
+   ```
+   process "/bin/sh -c node ... 'node_modules/@angular/cli/bin/ng' build --configuration production" did not complete successfully: exit code: 3
+   ```
+   This is unrelated to the binary-path issue above — an Angular/Node build failure inside the portal's own Dockerfile — and was not investigated further.
+
+Both are scoped as follow-up work, not part of this plan's original goal (which is fully met: the sync → build → release mechanism works, verified live, for every component whose build process is compatible with this fork's current binary-artifact layout).
