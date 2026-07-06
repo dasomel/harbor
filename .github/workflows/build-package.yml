@@ -618,11 +618,43 @@ jobs:
         run: |
           if [ -f "make/photon/${{ matrix.component }}/Dockerfile.multiarch" ]; then
             echo "path=make/photon/${{ matrix.component }}/Dockerfile.multiarch" >> "$GITHUB_OUTPUT"
+            echo "legacy=false" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           else
             echo "path=make/photon/${{ matrix.component }}/Dockerfile" >> "$GITHUB_OUTPUT"
+            case "${{ matrix.component }}" in
+              core|jobservice|registryctl|registry|trivy-adapter)
+                # Pre-multiarch Dockerfile expecting externally-compiled binaries at
+                # fixed single-arch paths — handled by the per-arch legacy build below.
+                echo "legacy=true" >> "$GITHUB_OUTPUT"
+                echo "skip=false" >> "$GITHUB_OUTPUT"
+                ;;
+              exporter)
+                # Pre-multiarch exporter self-builds in-image with GOARCH=amd64
+                # hardcoded and needs a build_image arg this pipeline doesn't
+                # provide — a real arm64 image is impossible without modifying
+                # upstream source. Skip rather than publish a broken image.
+                echo "legacy=false" >> "$GITHUB_OUTPUT"
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                ;;
+              *)
+                # Plain Dockerfile with no compiled-binary COPY — multi-platform
+                # build works as-is through the normal step.
+                echo "legacy=false" >> "$GITHUB_OUTPUT"
+                echo "skip=false" >> "$GITHUB_OUTPUT"
+                ;;
+            esac
           fi
 
+      - name: Download registry binary for registryctl (legacy layout)
+        if: matrix.component == 'registryctl' && steps.dockerfile.outputs.legacy == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: pkg-binary-registry
+          path: make/photon/registry/binary/
+
       - name: Build and push final image
+        if: steps.dockerfile.outputs.legacy != 'true' && steps.dockerfile.outputs.skip != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -648,10 +680,64 @@ jobs:
           sbom: true
           provenance: true
 
+      - name: Build and push final image (legacy per-arch)
+        if: steps.dockerfile.outputs.legacy == 'true'
+        env:
+          IMAGE: ghcr.io/dasomel/goharbor/${{ steps.info.outputs.image_name }}
+          TAG: ${{ needs.BUILD_PACKAGE.outputs.version_tag }}
+        run: |
+          set -euo pipefail
+          # Pre-multiarch Dockerfiles have no TARGETARCH concept: they COPY a
+          # single binary from a fixed path. Build each architecture separately
+          # (staging that arch's binary at the legacy path first), then merge
+          # the per-arch images into one multi-arch manifest — the same pattern
+          # upstream's publish_release.yml uses.
+          for arch in amd64 arm64; do
+            case "${{ matrix.component }}" in
+              core)
+                cp "make/photon/core/binary/${arch}/harbor_core" "make/photon/core/harbor_core"
+                chmod +x "make/photon/core/harbor_core"
+                ;;
+              jobservice)
+                cp "make/photon/jobservice/binary/${arch}/harbor_jobservice" "make/photon/jobservice/harbor_jobservice"
+                chmod +x "make/photon/jobservice/harbor_jobservice"
+                ;;
+              registry)
+                cp "make/photon/registry/binary/${arch}/registry" "make/photon/registry/binary/registry"
+                chmod +x "make/photon/registry/binary/registry"
+                ;;
+              registryctl)
+                cp "make/photon/registryctl/binary/${arch}/harbor_registryctl" "make/photon/registryctl/harbor_registryctl"
+                cp "make/photon/registry/binary/${arch}/registry" "make/photon/registry/binary/registry"
+                chmod +x "make/photon/registryctl/harbor_registryctl" "make/photon/registry/binary/registry"
+                ;;
+              trivy-adapter)
+                cp "make/photon/trivy-adapter/binary/${arch}/trivy" "make/photon/trivy-adapter/binary/trivy"
+                cp "make/photon/trivy-adapter/binary/${arch}/scanner-trivy" "make/photon/trivy-adapter/binary/scanner-trivy"
+                chmod +x "make/photon/trivy-adapter/binary/trivy" "make/photon/trivy-adapter/binary/scanner-trivy"
+                ;;
+            esac
+            docker buildx build \
+              --platform "linux/${arch}" \
+              -f "${{ steps.dockerfile.outputs.path }}" \
+              --build-arg harbor_base_image_version="${TAG}" \
+              --build-arg harbor_base_namespace=ghcr.io/dasomel/goharbor \
+              --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+              --label "org.opencontainers.image.revision=${{ github.sha }}" \
+              --label "org.opencontainers.image.version=${TAG}" \
+              --provenance=false \
+              -t "${IMAGE}:${TAG}-${arch}" \
+              --push \
+              .
+          done
+          docker buildx imagetools create -t "${IMAGE}:${TAG}" "${IMAGE}:${TAG}-amd64" "${IMAGE}:${TAG}-arm64"
+          docker buildx imagetools create -t "${IMAGE}:latest" "${IMAGE}:${TAG}-amd64" "${IMAGE}:${TAG}-arm64"
+
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3
 
       - name: Sign final image with Cosign
+        if: steps.dockerfile.outputs.skip != 'true'
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
