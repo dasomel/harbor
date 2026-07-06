@@ -613,11 +613,20 @@ jobs:
           echo "description=${DESC}" >> $GITHUB_OUTPUT
           echo "image_name=${NAME}" >> $GITHUB_OUTPUT
 
+      - name: Determine Dockerfile
+        id: dockerfile
+        run: |
+          if [ -f "make/photon/${{ matrix.component }}/Dockerfile.multiarch" ]; then
+            echo "path=make/photon/${{ matrix.component }}/Dockerfile.multiarch" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=make/photon/${{ matrix.component }}/Dockerfile" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build and push final image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./make/photon/${{ matrix.component }}/Dockerfile${{ contains(fromJSON('["core", "jobservice", "registryctl", "registry", "trivy-adapter", "exporter"]'), matrix.component) && '.multiarch' || '' }}
+          file: ${{ steps.dockerfile.outputs.path }}
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
