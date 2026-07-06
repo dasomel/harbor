@@ -1839,3 +1839,59 @@ curl was silently downloading a 9-byte 'Not Found' error body instead.
 v0.72.0 is the current latest release with the same asset naming
 pattern this workflow already expects."
 ```
+
+---
+
+### Task 16: Fix stale swagger-codegen version (v0.31.0 → v0.33.1)
+
+**Files:**
+- Modify: `.github/workflows/build-package.yml` (the `SWAGGER_VERSION` variable and its one usage, in `compile-binaries`'s "Generate swagger APIs (for core)" step)
+
+**Interfaces:** none — a version-string constant used only within this one step.
+
+**Why:** live end-to-end testing found `compile-binaries (core, harbor_core)` failing on real releases with generated-code type errors, e.g.:
+```
+../server/v2.0/restapi/operations/harbor_api.go:92:65: cannot convert func(params artifact.CopyArtifactParams, principal *interface{}) middleware.Responder {…} (value of type func(...)) to type artifact.CopyArtifactHandlerFunc
+```
+`build-package.yml` hardcodes `SWAGGER_VERSION=v0.31.0` for the `quay.io/goswagger/swagger` codegen tool that regenerates `src/server/v2.0/...` from `api/v2.0/swagger.yaml`. Confirmed directly via each release's own `Makefile` (the authoritative source, unrelated to any workflow file): `v2.15.0`, `v2.15.1`, `v2.15.2`, and current `main` **all** specify `SWAGGER_VERSION=v0.33.1` — unlike the Go-toolchain issue (Task 14), this version is consistent across every relevant release, so a plain hardcoded bump (not dynamic detection) is the correct, sufficient fix. `v0.31.0` appears to have simply been wrong/stale in this workflow from the start, not a rename or version drift over time. Confirmed `quay.io/goswagger/swagger:v0.33.1` exists (amd64+arm64 manifest) before this task was written.
+
+- [ ] **Step 1: Bump `SWAGGER_VERSION`**
+
+Find (inside `compile-binaries`'s "Generate swagger APIs (for core)" step):
+```yaml
+          SWAGGER_VERSION=v0.31.0
+```
+Replace with:
+```yaml
+          SWAGGER_VERSION=v0.33.1
+```
+
+- [ ] **Step 2: Validate YAML syntax**
+
+Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/build-package.yml'))" && echo OK`
+Expected: `OK`
+
+- [ ] **Step 3: Confirm the new version's image actually exists (read-only, no side effects)**
+
+Run: `docker manifest inspect quay.io/goswagger/swagger:v0.33.1 | head -5`
+Expected: valid JSON manifest output (not a "manifest unknown" error), confirming the tag is pullable.
+
+- [ ] **Step 4: Confirm exactly one occurrence was changed, and the templated usage line is untouched**
+
+Run: `grep -n 'SWAGGER_VERSION' .github/workflows/build-package.yml`
+Expected: two lines — `SWAGGER_VERSION=v0.33.1` (the literal, now updated) and `quay.io/goswagger/swagger:${SWAGGER_VERSION} \` (the reference, unchanged — it just interpolates whatever `SWAGGER_VERSION` is set to).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add .github/workflows/build-package.yml
+git commit -m "fix(ci): bump stale swagger-codegen version to match what releases actually expect
+
+compile-binaries (core) failed with generated-code type mismatches
+(e.g. 'cannot convert func(..., principal *interface{}) ... to type
+...HandlerFunc'). build-package.yml hardcoded SWAGGER_VERSION=v0.31.0,
+but v2.15.0/v2.15.1/v2.15.2 and current main's own Makefiles all specify
+v0.33.1 — a plain stale value, not a version that varies by release, so
+a straight bump (not dynamic detection like the Go toolchain fix) is
+the correct, sufficient fix here."
+```
