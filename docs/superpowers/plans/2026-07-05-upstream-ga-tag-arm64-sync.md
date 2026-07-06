@@ -1895,3 +1895,98 @@ v0.33.1 — a plain stale value, not a version that varies by release, so
 a straight bump (not dynamic detection like the Go toolchain fix) is
 the correct, sufficient fix here."
 ```
+
+---
+
+### Task 17: Run swagger codegen natively (via `go install`) instead of inside a Go-less Docker container
+
+**Files:**
+- Modify: `.github/workflows/build-package.yml` (`compile-binaries`'s "Generate swagger APIs (for core)" step)
+
+**Interfaces:** none — this step's output (`src/server/v2.0/models`, `src/server/v2.0/restapi`) is consumed by the same job's subsequent compile step, unchanged in shape.
+
+**Why:** live end-to-end testing (re-run after Task 16's `SWAGGER_VERSION` bump) found `compile-binaries (core)` now failing differently:
+```
+source formatting on generated source "definition" failed: err: go command required, not found: exec: "go": executable file not found in $PATH
+```
+`quay.io/goswagger/swagger:v0.33.1` (unlike whatever the stale `v0.31.0` tag needed, which never got this far before failing on the type-mismatch bug Task 16 fixed) shells out to `go` internally to format generated source, but this Docker image has no Go toolchain in it at all. Confirmed via a local reproduction: `go install github.com/go-swagger/go-swagger/cmd/swagger@v0.33.1` (run natively, not in that Docker image) installs and runs cleanly, reporting `version: v0.33.1`. This job already runs `actions/setup-go` earlier (with `GOTOOLCHAIN=auto` implicitly available, so `go install` self-resolves whatever Go version `go-swagger`'s own `go.mod` needs), so the simplest fix is to stop using the Docker image entirely and install/run `swagger` natively on the runner, where a working `go` is already on `PATH`.
+
+- [ ] **Step 1: Replace the Docker-based invocation with a native `go install`**
+
+Replace:
+```yaml
+      - name: Generate swagger APIs (for core)
+        if: matrix.component == 'core'
+        run: |
+          SWAGGER_VERSION=v0.33.1
+          rm -rf src/server/v2.0/models src/server/v2.0/restapi
+          mkdir -p src/server/v2.0
+          docker run --rm \
+            -v $(pwd):/work \
+            -w /work \
+            -e GOFLAGS="-buildvcs=false" \
+            quay.io/goswagger/swagger:${SWAGGER_VERSION} \
+            generate server \
+            --template-dir=tools/swagger/templates \
+            --exclude-main \
+            --additional-initialism=CVE \
+            --additional-initialism=GC \
+            --additional-initialism=OIDC \
+            -f api/v2.0/swagger.yaml \
+            -A harbor \
+            --target src/server/v2.0
+```
+with:
+```yaml
+      - name: Generate swagger APIs (for core)
+        if: matrix.component == 'core'
+        env:
+          GOFLAGS: "-buildvcs=false"
+          GOTOOLCHAIN: auto
+        run: |
+          SWAGGER_VERSION=v0.33.1
+          rm -rf src/server/v2.0/models src/server/v2.0/restapi
+          mkdir -p src/server/v2.0
+          go install github.com/go-swagger/go-swagger/cmd/swagger@${SWAGGER_VERSION}
+          "$(go env GOPATH)/bin/swagger" generate server \
+            --template-dir=tools/swagger/templates \
+            --exclude-main \
+            --additional-initialism=CVE \
+            --additional-initialism=GC \
+            --additional-initialism=OIDC \
+            -f api/v2.0/swagger.yaml \
+            -A harbor \
+            --target src/server/v2.0
+```
+
+- [ ] **Step 2: Validate YAML syntax**
+
+Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/build-package.yml'))" && echo OK`
+Expected: `OK`
+
+- [ ] **Step 3: Reproduce the native install locally, exactly as the step now does it**
+
+Run:
+```bash
+docker run --rm golang:1.24 sh -c '
+  export GOFLAGS="-buildvcs=false"
+  export GOTOOLCHAIN=auto
+  go install github.com/go-swagger/go-swagger/cmd/swagger@v0.33.1
+  "$(go env GOPATH)/bin/swagger" version
+'
+```
+Expected: prints `version: v0.33.1` (confirms the install + invocation shape works standalone, using the same env vars the real step now sets, before this touches the real workflow's behavior).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add .github/workflows/build-package.yml
+git commit -m "fix(ci): run swagger codegen natively instead of inside a Go-less container
+
+quay.io/goswagger/swagger:v0.33.1 shells out to 'go' internally to format
+generated source, but that Docker image has no Go toolchain at all —
+'go': executable file not found in \$PATH. This job already sets up Go
+via actions/setup-go, so installing and running the swagger CLI natively
+(go install .../swagger@v0.33.1) avoids needing a Go toolchain baked into
+that container image."
+```
