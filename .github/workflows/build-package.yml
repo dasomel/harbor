@@ -616,6 +616,8 @@ jobs:
       - name: Determine Dockerfile
         id: dockerfile
         run: |
+          node_image=$(grep -E '^NODEBUILDIMAGE=' Makefile | head -n1 | cut -d= -f2)
+          echo "node_image=${node_image:-node:16.18.0}" >> "$GITHUB_OUTPUT"
           if [ -f "make/photon/${{ matrix.component }}/Dockerfile.multiarch" ]; then
             echo "path=make/photon/${{ matrix.component }}/Dockerfile.multiarch" >> "$GITHUB_OUTPUT"
             echo "legacy=false" >> "$GITHUB_OUTPUT"
@@ -664,7 +666,7 @@ jobs:
           build-args: |
             harbor_base_image_version=${{ needs.BUILD_PACKAGE.outputs.version_tag }}
             harbor_base_namespace=ghcr.io/dasomel/goharbor
-            NODE=node:16.18.0
+            NODE=${{ steps.dockerfile.outputs.node_image }}
             npm_registry=https://registry.npmjs.org
           tags: |
             ghcr.io/dasomel/goharbor/${{ steps.info.outputs.image_name }}:${{ needs.BUILD_PACKAGE.outputs.version_tag }}
