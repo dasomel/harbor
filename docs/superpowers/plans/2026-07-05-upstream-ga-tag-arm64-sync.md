@@ -2116,6 +2116,14 @@ Per fork policy `:latest` follows the **most recently completed build**, not the
 
 (The portal Angular-build failure formerly listed here is **fixed** by Task 20 — it was a stale hardcoded `NODE` image, not an intrinsic limitation.)
 
+### Upstream tracking — [goharbor/harbor#22311](https://github.com/goharbor/harbor/pull/22311) (exporter arm64)
+
+Status (verified 2026-07-07): #22311 "Full Multi-Architecture Enablement" is **merged to upstream `main`** (2026-05-12, commit `18f7abd8e`, closed) and **already synced into this fork's `main`** (`git merge-base --is-ancestor 18f7abd8e origin/main` → true; `make/photon/exporter/Dockerfile` on `origin/main` now has `ENV GOARCH=${TARGETARCH}`). It is **not in any release tag** (`git tag --contains 18f7abd8e` is empty; all `v2.15.x` predate it). Consequences and follow-ups:
+
+1. **Fork `main` (`:latest`) exporter no longer needs the fork's workaround.** With upstream's `Dockerfile` now `TARGETARCH`-aware, the fork-added `make/photon/exporter/Dockerfile.multiarch` (commit `32e0f7875`) is **redundant on `main`** — both produce a real arm64 exporter. Harmless (the runtime `Dockerfile.multiarch` detection still uses it), but a candidate for cleanup.
+2. **Action when the first release containing #22311 ships (expected `v2.16.0`):** revisit the hardcoded `exporter) skip=true` branch in `build-package.yml`. That release's own `Dockerfile` will build arm64 via `TARGETARCH`, so exporter must **no longer be skipped** — otherwise the pipeline would keep skipping a component that now builds cleanly. (v2.15.x must keep the skip; the fix is release-conditional, matching the self-adapting pattern of Tasks 12/18/20.)
+3. As of 2026-07-07 upstream's latest release is still `v2.15.2` and the latest Helm chart is `v1.19.1` (appVersion `2.15.1`) — no `v2.16.x` image tag or chart exists yet, so no action is due until then.
+
 ---
 
 ### Task 19: Per-arch legacy builds + manifest merge for pre-`Dockerfile.multiarch` releases
