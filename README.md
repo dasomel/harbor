@@ -40,7 +40,7 @@ All images are available at `ghcr.io/dasomel/goharbor/` and are fully compatible
 | `trivy-adapter-photon`| Security Scanner| `amd64`, `arm64` | Signed, SBOM, SLSA |
 | ...and more | All components | `amd64`, `arm64` | Signed, SBOM, SLSA |
 
-> **Cache backend:** Since upstream `v2.15.2`, Harbor replaced its Redis cache with **Valkey** ([goharbor/harbor#23157](https://github.com/goharbor/harbor/pull/23157)). For `v2.15.2`+ the internal cache image is `valkey-photon` (multi-arch); `redis-photon` applies only to `v2.15.0`/`v2.15.1`.
+> **Cache backend (`redis-photon` → `valkey-photon`):** Since upstream `v2.15.2`, Harbor replaced its Redis cache with **Valkey** ([goharbor/harbor#23157](https://github.com/goharbor/harbor/pull/23157)). The internal-cache image is `valkey-photon` for `v2.15.2`+ and `redis-photon` for `v2.15.0`/`v2.15.1` — **both multi-arch**. A missing `redis-photon:v2.15.2` is **expected, not a coverage gap**: its `v2.15.2` equivalent is `valkey-photon:v2.15.2`, and `redis.type=internal` pulls `goharbor/valkey-photon` on `v2.15.2`+. When auditing `v2.15.2`+, check `valkey-photon`, not `redis-photon`.
 
 ### Known Limitations
 

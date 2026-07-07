@@ -77,7 +77,7 @@ docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 | nginx | nginx-photon | Nginx 프록시 |
 | portal | harbor-portal | 웹 UI |
 | prepare | prepare | 설정 준비 도구 |
-| redis | redis-photon | Redis 캐시 |
+| redis / valkey | redis-photon (`v2.15.0`/`v2.15.1`) · **valkey-photon** (`v2.15.2`+) | 내부 캐시 — 업스트림이 v2.15.2에서 Redis→Valkey 교체 ([#23157](https://github.com/goharbor/harbor/pull/23157)). `v2.15.2`+에선 `redis-photon`이 없는 게 정상이며 `valkey-photon`이 그 자리를 대신함 |
 | registry | registry-photon | Docker Registry |
 | registryctl | harbor-registryctl | Registry 컨트롤러 |
 | trivy-adapter | trivy-adapter-photon | 취약점 스캐너 |
@@ -137,6 +137,8 @@ database:
 redis:
   internal:
     image:
+      # v2.15.0 / v2.15.1: redis-photon (아래) — v2.15.2+ 는 valkey-photon 사용
+      #   repository: ghcr.io/YOUR_USERNAME/harbor/valkey-photon
       repository: ghcr.io/YOUR_USERNAME/harbor/redis-photon
       tag: v2.15.0-arm64
 
