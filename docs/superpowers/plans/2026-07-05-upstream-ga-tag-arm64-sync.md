@@ -2096,7 +2096,7 @@ Multi-arch manifests confirmed via `docker buildx imagetools inspect` (both `lin
 
 ### Remaining limitations (external or out-of-scope)
 
-1. **`redis` on `v2.15.1` (and intermittently others ≤ v2.15.1) can fail with `redis package not found`.** VMware Photon OS 5.0's package repository removed the `redis` package (replaced by `valkey` — the very reason upstream migrated). This is **external and non-deterministic**: `v2.15.0`'s redis build succeeded on 2026-07-06 while `v2.15.1`'s failed on 2026-07-07 with the same Dockerfile, indicating the mirror's availability of the (removed) package is inconsistent. Nothing in this workflow can fix a package the OS vendor deleted; the self-healing retry (Task 9) is the correct handling — it will complete v2.15.1 automatically if the package ever resolves, and otherwise leaves the other 11 components' images published.
+1. ~~**`redis` on `v2.15.1` fails with `redis package not found`.**~~ **FIXED by Task 21.** Root cause was NOT a removed package: `v2.15.1`'s redis Dockerfile.base uses `FROM goharbor/photon:5.0`, whose pinned snapshot repo has `valkey` (providing the `redis` capability) but no by-name `redis` package, and `tdnf install redis` doesn't fall back to the capability provider there. `v2.15.0` succeeded only because its Dockerfile.base uses `FROM photon:5.0` (official), which resolves redis→valkey. Task 21 remaps the redis base to official `photon:5.0` via buildx `--build-context`, making v2.15.1's redis build succeed on both arches without editing the upstream Dockerfile.
 
 2. **`exporter` on pre-`Dockerfile.multiarch` releases cannot produce a real arm64 image at all.** Its plain `Dockerfile` is a multi-stage build that compiles the binary *inside* the image build with `ENV GOARCH=amd64` hardcoded (and requires a `build_image` build-arg this pipeline never provided). Producing arm64 would require modifying the upstream release's own source, violating this project's build-the-exact-upstream-source principle. Task 19 explicitly **skips** `exporter` in legacy mode rather than publishing a mislabeled amd64-only binary in an arm64 manifest slot. (`v2.15.2`+ ships a proper `Dockerfile.multiarch` for exporter, so this only affects pre-multiarch releases.)
 
@@ -2412,3 +2412,93 @@ Push and re-run the sync (`dry_run=false`). Expected for the `v2.15.2` run:
 - `build-final-images (portal)`: **success** (first time ever)
 - `build-final-images` overall: success → `create-github-release` runs → `gh release view v2.15.2 --repo dasomel/harbor` shows a Release titled `v2.15.2 (linux/amd64, linux/arm64)`
 - Subsequent scheduled syncs no longer re-trigger `v2.15.2` (its Release now exists).
+
+---
+
+### Task 21: Build the `redis` base image from official `photon:5.0` (fixes v2.15.1 `redis package not found`)
+
+**Files:**
+- Modify: `.github/workflows/build-package.yml` (`build-base-images` job: add a conditional `build-contexts:` to the "Build and push base image" step)
+
+**Interfaces:** none — a docker/build-push-action input, conditional on `matrix.component`.
+
+**Why:** the redis failure (formerly "external, unfixable") was **root-caused and IS fixable.** `v2.15.1`'s `make/photon/redis/Dockerfile.base` does `FROM goharbor/photon:5.0` then `RUN tdnf install -y redis`. Confirmed directly:
+- `v2.15.0`'s redis Dockerfile.base uses `FROM photon:5.0` (official) and **builds fine** — `tdnf install redis` on official `photon:5.0` resolves via capability match, installing `valkey 9.0.3` which provides `/usr/bin/redis-server` (VMware Photon renamed the package but kept the redis capability + a `redis-server` compat binary).
+- `v2.15.1`'s redis Dockerfile.base uses `FROM goharbor/photon:5.0`, whose pinned `photon-snapshot` repo has `valkey` providing the `redis` *capability* but **no package named `redis`** — and `tdnf install redis` (by name) does not fall back to the capability-provider there, so it fails with `redis package not found`. (Tested directly: `docker run goharbor/photon:5.0 tdnf install -y redis` → `Error(1011): No matching packages`, while `docker run photon:5.0 tdnf install -y redis` → succeeds, installing valkey.)
+
+So the failure is purely a base-image-metadata difference, not a genuinely-removed package. The fix: for the `redis` component only, remap the `goharbor/photon:5.0` base reference to the official `photon:5.0` (which handles the redis→valkey capability resolution) using buildx's `--build-context` — without editing the release's own Dockerfile.base. Verified locally: with that remap, `v2.15.1`'s redis Dockerfile.base builds cleanly for **both** `linux/amd64` and `linux/arm64`, and the resulting image has a working `redis-server` (valkey 9.0.3 in redis-compat mode). This is exactly what `v2.15.0`'s redis image already contains, so it's consistent and faithful to how the Photon ecosystem now ships "redis". The remap is scoped to `redis` alone (a `matrix.component == 'redis'` conditional), so every other component's base build is completely unaffected, and it's a harmless no-op for `v2.15.0`'s redis (whose Dockerfile.base doesn't reference `goharbor/photon:5.0` at all).
+
+- [ ] **Step 1: Add the conditional `build-contexts:` input**
+
+In the `build-base-images` job's "Build and push base image" step, add a `build-contexts:` line. Change:
+```yaml
+      - name: Build and push base image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./make/photon/${{ matrix.component }}/Dockerfile.base
+          platforms: linux/amd64,linux/arm64
+          push: true
+```
+to:
+```yaml
+      - name: Build and push base image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./make/photon/${{ matrix.component }}/Dockerfile.base
+          build-contexts: ${{ matrix.component == 'redis' && 'goharbor/photon:5.0=docker-image://photon:5.0' || '' }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+```
+(An empty `build-contexts` value is a no-op — `docker/build-push-action` ignores it — so every non-redis component builds exactly as before. For `redis`, it rewrites `FROM goharbor/photon:5.0` to pull the official `photon:5.0` instead.)
+
+- [ ] **Step 2: Validate YAML syntax**
+
+Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/build-package.yml'))" && echo OK`
+Expected: `OK`
+
+- [ ] **Step 3: Confirm scope — exactly one build-contexts line, only in build-base-images**
+
+Run: `grep -n 'build-contexts:' .github/workflows/build-package.yml`
+Expected: exactly one line, inside the `build-base-images` job's "Build and push base image" step (the `build-final-images` step must NOT gain one — it builds from per-component base images, not `goharbor/photon:5.0`).
+
+- [ ] **Step 4: Reproduce the fix locally against v2.15.1's actual redis Dockerfile.base (both arches)**
+
+Run:
+```bash
+tmp=$(mktemp -d)
+git show v2.15.1:make/photon/redis/Dockerfile.base > "$tmp/Dockerfile.base"
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  --build-context "goharbor/photon:5.0=docker-image://photon:5.0" \
+  -f "$tmp/Dockerfile.base" \
+  "$tmp"
+echo "exit: $?"
+```
+Expected: `exit: 0` — the build completes for both platforms using the unmodified v2.15.1 Dockerfile.base, proving the `--build-context` remap (exactly what Step 1 wires into CI) makes `FROM goharbor/photon:5.0` + `tdnf install redis` succeed without editing the Dockerfile.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add .github/workflows/build-package.yml
+git commit -m "fix(ci): build redis base from official photon:5.0 to resolve redis->valkey
+
+v2.15.1's redis Dockerfile.base does FROM goharbor/photon:5.0 + tdnf
+install -y redis, but that image's pinned photon-snapshot repo has no
+package NAMED redis (only valkey, which provides the redis capability) —
+and tdnf install-by-name doesn't fall back to the capability provider
+there, so it fails with 'redis package not found'. The official photon:5.0
+DOES resolve it (installs valkey 9.0.3, which ships a redis-server compat
+binary) — which is exactly why v2.15.0's redis image (FROM photon:5.0)
+already builds fine. Remap goharbor/photon:5.0 -> photon:5.0 for the redis
+component only, via buildx --build-context, without editing the release's
+own Dockerfile. Verified locally to build both amd64 and arm64."
+```
+
+- [ ] **Step 6: Live end-to-end verification**
+
+Push and re-run the sync (`dry_run=false`). The idempotency check (Task 9) will re-trigger `v2.15.1` (it has no Release yet). Expected:
+- `build-base-images (redis)` for the `v2.15.1` run: **success** (previously the only failing job).
+- `v2.15.1`'s `build-final-images` completes for all components → `create-github-release` runs → `gh release view v2.15.1 --repo dasomel/harbor` shows `v2.15.1 (linux/amd64, linux/arm64)`.
+- `docker buildx imagetools inspect ghcr.io/dasomel/goharbor/redis-photon:v2.15.1` shows both `linux/amd64` and `linux/arm64`.
