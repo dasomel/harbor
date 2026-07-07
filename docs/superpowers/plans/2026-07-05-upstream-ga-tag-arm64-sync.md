@@ -2094,11 +2094,25 @@ The full chain — sync → tag push → `workflow_dispatch` trigger → `BUILD_
 
 Multi-arch manifests confirmed via `docker buildx imagetools inspect` (both `linux/amd64` and `linux/arm64` present) for legacy-built images like `harbor-core:v2.15.0`, `registry-photon:v2.15.2`, `redis-photon:v2.15.0`.
 
+### `:latest` pointer reconciliation (verified live 2026-07-07)
+
+Per fork policy `:latest` follows the **most recently completed build**, not the highest semver — `build-package.yml` pushes both `:<version>` and `:latest` on every build. Because the GA releases were built out of semver order (`v2.15.0` → `v2.15.2` → `v2.15.1` **last**, via Task 21), `:latest` had come to point at **v2.15.1**. To realign `:latest` with the highest semver, a `workflow_dispatch(release_tag=v2.15.2)` rebuild was run **last** (run `28865019658`, success). Verified afterwards in GHCR — `:latest` digest == `:v2.15.2` digest (MATCH) for all 7 tag-published components:
+
+| Component | `v2.15.2` | `:latest` == `v2.15.2` |
+|---|---|---|
+| harbor-core, harbor-jobservice, registry-photon, harbor-registryctl, harbor-portal, nginx-photon | ✅ | ✅ MATCH |
+| valkey-photon (replaces `redis-photon` since v2.15.2, upstream `88ab66244`) | ✅ | ✅ MATCH |
+| harbor-exporter | — (skipped — see limitation #2) | `:latest` tracks `main`, **not** v2.15.2 |
+
+- **`redis-photon:v2.15.2` does not exist by design.** Upstream renamed the cache backend redis→valkey in v2.15.2, so `valkey-photon:v2.15.2` is its replacement; a v2.15.2 deployment references `goharbor/valkey-photon` (compose template `docker-compose.yml.jinja`), never `redis-photon`. The original 8-component audit that requested this work looked for `redis-photon:v2.15.2` and mistook its (correct) absence for a gap.
+- **`harbor-exporter:latest` is the one component whose `:latest` is not v2.15.2** — skipped for every GA tag (limitation #2), so `:latest` remains an older `main` build. Harmless for a metrics-only exporter, but note the version skew.
+- **Durability caveat:** this realignment holds only until the next build runs; any later `main` `build.N` or lower-semver rebuild will move `:latest` again. A permanent fix would semver-gate the `:latest` push in CI (out of scope here).
+
 ### Remaining limitations (external or out-of-scope)
 
 1. ~~**`redis` on `v2.15.1` fails with `redis package not found`.**~~ **FIXED by Task 21.** Root cause was NOT a removed package: `v2.15.1`'s redis Dockerfile.base uses `FROM goharbor/photon:5.0`, whose pinned snapshot repo has `valkey` (providing the `redis` capability) but no by-name `redis` package, and `tdnf install redis` doesn't fall back to the capability provider there. `v2.15.0` succeeded only because its Dockerfile.base uses `FROM photon:5.0` (official), which resolves redis→valkey. Task 21 remaps the redis base to official `photon:5.0` via buildx `--build-context`, making v2.15.1's redis build succeed on both arches without editing the upstream Dockerfile.
 
-2. **`exporter` on pre-`Dockerfile.multiarch` releases cannot produce a real arm64 image at all.** Its plain `Dockerfile` is a multi-stage build that compiles the binary *inside* the image build with `ENV GOARCH=amd64` hardcoded (and requires a `build_image` build-arg this pipeline never provided). Producing arm64 would require modifying the upstream release's own source, violating this project's build-the-exact-upstream-source principle. Task 19 explicitly **skips** `exporter` in legacy mode rather than publishing a mislabeled amd64-only binary in an arm64 manifest slot. (`v2.15.2`+ ships a proper `Dockerfile.multiarch` for exporter, so this only affects pre-multiarch releases.)
+2. **`exporter` on pre-`Dockerfile.multiarch` releases cannot produce a real arm64 image at all.** Its plain `Dockerfile` is a multi-stage build that compiles the binary *inside* the image build with `ENV GOARCH=amd64` hardcoded (and requires a `build_image` build-arg this pipeline never provided). Producing arm64 would require modifying the upstream release's own source, violating this project's build-the-exact-upstream-source principle. Task 19 explicitly **skips** `exporter` in legacy mode rather than publishing a mislabeled amd64-only binary in an arm64 manifest slot. (**Correction — verified live 2026-07-07:** an earlier draft of this line claimed `v2.15.2`+ ships a proper `Dockerfile.multiarch` for exporter. That is **wrong**. `make/photon/exporter/Dockerfile.multiarch` exists **only on this fork's `main`** — added by fork-only commit `32e0f7875`, confirmed **not** in `upstream/main` — and is **absent from all of `v2.15.0`/`v2.15.1`/`v2.15.2`**. So `exporter` is skipped for **every** GA release built from an upstream tag: `harbor-exporter` has no `v2.15.x` GA tag at all, only `:latest` plus old `v2.15.0-build.N` tags — the `:latest` was last published by a `main` `build.N` run, which *does* carry the fork's multiarch Dockerfile and so is a real amd64+arm64 image. Deployments are unaffected because they reference `:latest`.)
 
 (The portal Angular-build failure formerly listed here is **fixed** by Task 20 — it was a stale hardcoded `NODE` image, not an intrinsic limitation.)
 
