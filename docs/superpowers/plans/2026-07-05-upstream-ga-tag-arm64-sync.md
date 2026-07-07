@@ -2082,19 +2082,25 @@ GOTOOLCHAIN=auto already do for other parts of this pipeline."
 
 ---
 
-## Known Limitations
+## Final State (verified live 2026-07-06 / 2026-07-07)
 
-After Task 18, live end-to-end testing on `v2.15.2` showed the full chain (sync → tag push → `workflow_dispatch` trigger → `BUILD_PACKAGE` → `discover-components` → `build-base-images` → `compile-*` → `build-final-images`) genuinely working end-to-end for 4 of 12 components (`valkey`, `db`, `nginx`, `log`) and the core mechanism (everything through Tasks 1-13) is fully verified.
+The full chain — sync → tag push → `workflow_dispatch` trigger → `BUILD_PACKAGE` → `discover-components` → `build-base-images` → `compile-*` → `build-final-images` → `create-github-release` — is **verified working end-to-end against the real repo**. Tasks 1-20 collectively took the pipeline from "no v2.15.x images at all" to full multi-arch releases:
 
-**Update:** the pre-`Dockerfile.multiarch` binary-layout incompatibility (formerly limitation #1 here) is now addressed by **Task 19** below for `core`, `jobservice`, `registryctl`, `registry`, and `trivy-adapter`. Two limitations remain, intentionally left unfixed:
+| Release | Outcome |
+|---|---|
+| **v2.15.0** | ✅ **Complete** — all 12 components built amd64+arm64 (redis included), GitHub Release `v2.15.0 (linux/amd64, linux/arm64)` created |
+| **v2.15.2** | ✅ **Complete** — all fixable components built amd64+arm64 (portal now passing via Task 20), `exporter` skipped by design, GitHub Release `v2.15.2 (linux/amd64, linux/arm64)` created |
+| **v2.15.1** | ⚠️ **11/12 components** build amd64+arm64; only `build-base-images (redis)` fails (external — see limitation #1). No Release yet; Task 9's Release-existence idempotency correctly keeps retrying it each scheduled sync (self-healing if/when the Photon mirror serves `redis` again). |
 
-1. **`exporter` on pre-`Dockerfile.multiarch` releases cannot produce a real arm64 image at all.** Its plain `Dockerfile` is a multi-stage build that compiles the binary *inside* the image build with `ENV GOARCH=amd64` hardcoded (and requires a `build_image` build-arg this pipeline never provided). No amount of workflow-side work can change what that Dockerfile bakes in — producing arm64 would require modifying the upstream release's own source, which violates this project's build-the-exact-upstream-source principle. Task 19 explicitly **skips** `exporter` in legacy mode (no exporter image for pre-multiarch releases) rather than publishing a mislabeled amd64-only binary in an arm64 manifest slot.
+Multi-arch manifests confirmed via `docker buildx imagetools inspect` (both `linux/amd64` and `linux/arm64` present) for legacy-built images like `harbor-core:v2.15.0`, `registry-photon:v2.15.2`, `redis-photon:v2.15.0`.
 
-2. **`build-final-images (portal)` fails independently** with:
-   ```
-   process "/bin/sh -c node ... 'node_modules/@angular/cli/bin/ng' build --configuration production" did not complete successfully: exit code: 3
-   ```
-   This is unrelated to the binary-path issue — an Angular/Node build failure inside the portal's own Dockerfile — and was not investigated further.
+### Remaining limitations (external or out-of-scope)
+
+1. **`redis` on `v2.15.1` (and intermittently others ≤ v2.15.1) can fail with `redis package not found`.** VMware Photon OS 5.0's package repository removed the `redis` package (replaced by `valkey` — the very reason upstream migrated). This is **external and non-deterministic**: `v2.15.0`'s redis build succeeded on 2026-07-06 while `v2.15.1`'s failed on 2026-07-07 with the same Dockerfile, indicating the mirror's availability of the (removed) package is inconsistent. Nothing in this workflow can fix a package the OS vendor deleted; the self-healing retry (Task 9) is the correct handling — it will complete v2.15.1 automatically if the package ever resolves, and otherwise leaves the other 11 components' images published.
+
+2. **`exporter` on pre-`Dockerfile.multiarch` releases cannot produce a real arm64 image at all.** Its plain `Dockerfile` is a multi-stage build that compiles the binary *inside* the image build with `ENV GOARCH=amd64` hardcoded (and requires a `build_image` build-arg this pipeline never provided). Producing arm64 would require modifying the upstream release's own source, violating this project's build-the-exact-upstream-source principle. Task 19 explicitly **skips** `exporter` in legacy mode rather than publishing a mislabeled amd64-only binary in an arm64 manifest slot. (`v2.15.2`+ ships a proper `Dockerfile.multiarch` for exporter, so this only affects pre-multiarch releases.)
+
+(The portal Angular-build failure formerly listed here is **fixed** by Task 20 — it was a stale hardcoded `NODE` image, not an intrinsic limitation.)
 
 ---
 
