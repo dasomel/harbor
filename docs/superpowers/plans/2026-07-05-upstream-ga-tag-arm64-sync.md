@@ -2090,7 +2090,7 @@ The full chain — sync → tag push → `workflow_dispatch` trigger → `BUILD_
 |---|---|
 | **v2.15.0** | ✅ **Complete** — all 12 components built amd64+arm64 (redis included), GitHub Release `v2.15.0 (linux/amd64, linux/arm64)` created |
 | **v2.15.2** | ✅ **Complete** — all fixable components built amd64+arm64 (portal now passing via Task 20), `exporter` skipped by design, GitHub Release `v2.15.2 (linux/amd64, linux/arm64)` created |
-| **v2.15.1** | ⚠️ **11/12 components** build amd64+arm64; only `build-base-images (redis)` fails (external — see limitation #1). No Release yet; Task 9's Release-existence idempotency correctly keeps retrying it each scheduled sync (self-healing if/when the Photon mirror serves `redis` again). |
+| **v2.15.1** | ✅ **Complete** (after Task 21) — all 12 components build amd64+arm64 including `redis` (the `redis-photon` image contains valkey-in-redis-compat-mode, same as v2.15.0), GitHub Release `v2.15.1 (linux/amd64, linux/arm64)` created 2026-07-07. |
 
 Multi-arch manifests confirmed via `docker buildx imagetools inspect` (both `linux/amd64` and `linux/arm64` present) for legacy-built images like `harbor-core:v2.15.0`, `registry-photon:v2.15.2`, `redis-photon:v2.15.0`.
 
