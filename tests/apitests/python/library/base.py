@@ -89,8 +89,10 @@ def _assert_status_body(expect_status_body, returned_status_body):
     if str(returned_status_body.strip()).lower().find(expect_status_body.lower()) < 0:
         raise Exception(r"HTTPS status body s not as we expected. Expected {}, while actual HTTPS status body is {}.".format(expect_status_body, returned_status_body))
 
-def _random_name(prefix):
-    return "%s-%d" % (prefix, int(round(time.time() * 1000)))
+def _random_name(prefix, timestamp=None):
+    if timestamp is None:
+        timestamp = int(round(time.time() * 1000))
+    return "%s-%d" % (prefix, timestamp)
 
 def _get_id_from_header(header):
     try:
