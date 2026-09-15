@@ -42,7 +42,16 @@ jobs:
             ".github/workflows/conformance_test.yml"
             ".github/workflows/CI.yml"
             ".github/workflows/publish_release.yml"
+            ".github/workflows/pass-CI.yml"
+            ".github/workflows/housekeeping-stale-issues-prs.yaml"
+            ".github/workflows/nightly-trivy-scan.yml"
+            ".github/workflows/codeql-analysis.yml"
+            ".github/workflows/api-schema-check.yml"
+            ".github/workflows/label_check.yaml"
+            ".github/workflows/auto_assign_prs.yml"
             "README.md"
+            "FORK_CHANGES.md"
+            "FORK_CHANGES.ko.md"
             "tests/ci/api_run.sh"
           )
 

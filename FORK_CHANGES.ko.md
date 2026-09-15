@@ -6,6 +6,16 @@
 
 ---
 
+## 2026-09-16
+
+### Fixed
+- CNCF 전용 러너 부재로 인한 GitHub Actions 무한 큐잉 및 24시간 타임아웃 해결
+  - `housekeeping-stale-issues-prs.yaml`: 스케줄 트리거 비활성화 및 러너 `ubuntu-latest`로 변경
+  - `nightly-trivy-scan.yml`: 스케줄 트리거 비활성화 및 러너 `ubuntu-latest`로 변경
+  - `codeql-analysis.yml`: 자동 트리거(push, pr, schedule) 비활성화 및 러너 `ubuntu-latest`로 변경 (`workflow_dispatch` 지원)
+  - `pass-CI.yml`, `api-schema-check.yml`, `label_check.yaml`, `auto_assign_prs.yml`, `conformance_test.yml`: `runs-on`을 `ubuntu-latest`로 변경
+  - `sync-upstream.yml`: `FORK_SPECIFIC_FILES` 목록에 수정된 워크플로우 파일들 등록
+
 ## 2026-02-12
 
 ### Fixed (upstream sync로 해결)

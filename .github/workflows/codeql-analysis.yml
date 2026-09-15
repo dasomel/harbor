@@ -1,10 +1,12 @@
 name: "Code scanning - action"
 
 on:
-  push:
-  pull_request:
-  schedule:
-    - cron: '0 16 * * 6'
+  workflow_dispatch:
+  # Disabled on fork: Requires cncf-ubuntu-16-64-x86 runner (16 vCPU, 64GB RAM)
+  # push:
+  # pull_request:
+  # schedule:
+  #   - cron: '0 16 * * 6'
 
 permissions:
   security-events: write
@@ -13,7 +15,7 @@ permissions:
 jobs:
   CodeQL-Build:
 
-    runs-on: cncf-ubuntu-16-64-x86
+    runs-on: ubuntu-latest
 
     steps:
     - name: Checkout repository

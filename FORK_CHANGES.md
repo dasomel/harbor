@@ -6,6 +6,16 @@ This document records changes made after forking from [goharbor/harbor](https://
 
 ---
 
+## 2026-09-16
+
+### Fixed
+- Resolve infinite runner queuing and 24h timeouts caused by CNCF-hosted runner requirement
+  - `housekeeping-stale-issues-prs.yaml`: Disable schedule trigger and set runner to `ubuntu-latest`
+  - `nightly-trivy-scan.yml`: Disable schedule trigger and set runner to `ubuntu-latest`
+  - `codeql-analysis.yml`: Disable automatic triggers (push, pr, schedule) and set runner to `ubuntu-latest` (`workflow_dispatch` supported)
+  - `pass-CI.yml`, `api-schema-check.yml`, `label_check.yaml`, `auto_assign_prs.yml`, `conformance_test.yml`: Migrate `runs-on` to `ubuntu-latest`
+  - `sync-upstream.yml`: Register modified workflow files into `FORK_SPECIFIC_FILES`
+
 ## 2026-02-12
 
 ### Fixed (via upstream sync)

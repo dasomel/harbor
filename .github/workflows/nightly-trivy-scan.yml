@@ -1,7 +1,9 @@
 name: Trivy Nightly Scan
 on:
-  schedule:
-    - cron: '0 2 * * *' # run at 2 AM UTC
+  workflow_dispatch:
+  # Disabled on fork: No cncf runner available
+  # schedule:
+  #   - cron: '0 2 * * *' # run at 2 AM UTC
 
 
 jobs:
@@ -19,7 +21,7 @@ jobs:
       security-events: write  # for github/codeql-action/upload-sarif to upload SARIF results
       contents: read
 
-    runs-on: cncf-ubuntu-16-64-x86
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

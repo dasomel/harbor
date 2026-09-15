@@ -17,9 +17,7 @@ jobs:
   CONFORMANCE_TEST:
     env:
       CONFORMANCE_TEST: true
-    runs-on:
-      #- self-hosted
-      - cncf-ubuntu-16-64-x86
+    runs-on: ubuntu-latest
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
