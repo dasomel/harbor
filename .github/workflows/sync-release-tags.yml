@@ -2,7 +2,10 @@ name: "Sync Release Tags"
 
 on:
   schedule:
-    - cron: '30 0 * * *' # 매일 00:30 UTC, sync-upstream.yml(00:00) 직후 실행
+    - cron: '30 */3 * * *' # 3시간마다, sync-upstream.yml 직후 실행
+  workflow_run:
+    workflows: ["Sync Upstream"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -12,6 +15,7 @@ on:
 
 jobs:
   sync-release-tags:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write

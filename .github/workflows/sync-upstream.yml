@@ -2,7 +2,7 @@ name: "Sync Upstream"
 
 on:
   schedule:
-    - cron: '0 0 * * *' # 매일 자정(UTC)에 실행
+    - cron: '0 */3 * * *' # 3시간마다 실행 (upstream 보안 패치 반영 지연 방지)
   workflow_dispatch:   # 수동 실행 버튼 추가
 
 jobs:
@@ -89,3 +89,14 @@ jobs:
             git push origin main
             echo "Successfully merged with fork-specific files preserved."
           fi
+
+      - name: Verify fork is not behind upstream
+        run: |
+          git fetch origin main
+          git fetch upstream main
+          behind=$(git rev-list --count origin/main..upstream/main)
+          if [ "$behind" -gt 0 ]; then
+            echo "::error::origin/main is still ${behind} commits behind upstream/main after sync"
+            exit 1
+          fi
+          echo "origin/main is up to date with upstream/main"
