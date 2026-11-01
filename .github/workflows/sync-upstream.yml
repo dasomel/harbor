@@ -2,7 +2,7 @@ name: "Sync Upstream"
 
 on:
   schedule:
-    - cron: '0 */3 * * *' # 3시간마다 실행 (upstream 보안 패치 반영 지연 방지)
+    - cron: '7 */3 * * *' # 3시간마다 실행, 정각 부하 회피 (upstream 보안 패치 반영 지연 방지)
   workflow_dispatch:   # 수동 실행 버튼 추가
 
 jobs:
