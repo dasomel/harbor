@@ -6,6 +6,17 @@ This document records changes made after forking from [goharbor/harbor](https://
 
 ---
 
+## 2026-11-02
+
+### Fixed
+- `CI.yml`: Pin all jobs to `ubuntu-24.04`. `ubuntu-latest` moved to 26.04 (sudo-rs), where `sudo -E env make go_check` drops `GOPATH` (UTTEST cannot find golangci-lint) and the API test jobs fail to start dind
+- `CI.yml`: Re-base on upstream (Go 1.27.3, Go tool cache, pinned action SHAs). Fork deltas kept: runner, `DOCKER_USER`/`DOCKER_PWD` secrets, `${{ github.workspace }}` artifact path
+- `sync-upstream.yml`, `sync-release-tags.yml`: Shift cron minute to 7/37 to re-register dropped schedules
+
+> Note: files in `FORK_SPECIFIC_FILES` keep the fork version on conflict, so upstream updates to them are not merged. Re-base them on upstream periodically.
+
+---
+
 ## 2026-09-16
 
 ### Fixed

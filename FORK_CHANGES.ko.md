@@ -6,6 +6,17 @@
 
 ---
 
+## 2026-11-02
+
+### Fixed
+- `CI.yml`: 전 job을 `ubuntu-24.04`로 고정. `ubuntu-latest`가 26.04(sudo-rs)로 바뀌며 `sudo -E env make go_check`가 `GOPATH`를 넘기지 않아 UTTEST가 golangci-lint를 못 찾고, API 테스트 job은 dind 기동에 실패
+- `CI.yml`: upstream 기준으로 재정렬(Go 1.27.3, Go tool 캐시, action SHA 고정). fork 고유 변경 유지: runner, `DOCKER_USER`/`DOCKER_PWD` secret, `${{ github.workspace }}` artifact 경로
+- `sync-upstream.yml`, `sync-release-tags.yml`: 누락된 스케줄 재등록을 위해 cron 분을 7/37로 변경
+
+> 참고: `FORK_SPECIFIC_FILES`의 파일은 충돌 시 fork 버전을 유지하므로 upstream 변경이 반영되지 않습니다. 주기적으로 upstream 기준으로 재정렬해야 합니다.
+
+---
+
 ## 2026-09-16
 
 ### Fixed
