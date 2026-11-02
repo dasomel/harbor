@@ -48,7 +48,7 @@ jobs:
   UTTEST:
     env:
       UTTEST: true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # D1: ubuntu-latest(26.04)는 sudo-rs가 sudo -E 환경을 넘기지 않아 UTTEST·dind 실패
     timeout-minutes: 100
     steps:
       - name: Set up Go 1.25
@@ -110,7 +110,7 @@ jobs:
       APITEST_DB: true
       DOCKER_USER: ${{ secrets.DOCKER_USER }}
       DOCKER_PWD: ${{ secrets.DOCKER_PWD }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # D1: ubuntu-latest(26.04)는 sudo-rs가 sudo -E 환경을 넘기지 않아 UTTEST·dind 실패
     timeout-minutes: 100
     steps:
       - name: Set up Go 1.23
@@ -171,7 +171,7 @@ jobs:
       APITEST_DB: true
       DOCKER_USER: ${{ secrets.DOCKER_USER }}
       DOCKER_PWD: ${{ secrets.DOCKER_PWD }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # D1: ubuntu-latest(26.04)는 sudo-rs가 sudo -E 환경을 넘기지 않아 UTTEST·dind 실패
     timeout-minutes: 100
     steps:
       - name: Set up Go 1.23
@@ -230,7 +230,7 @@ jobs:
   APITEST_LDAP:
     env:
       APITEST_LDAP: true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # D1: ubuntu-latest(26.04)는 sudo-rs가 sudo -E 환경을 넘기지 않아 UTTEST·dind 실패
     timeout-minutes: 100
     steps:
       - name: Set up Go 1.23
@@ -287,7 +287,7 @@ jobs:
   OFFLINE:
     env:
       OFFLINE: true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # D1: ubuntu-latest(26.04)는 sudo-rs가 sudo -E 환경을 넘기지 않아 UTTEST·dind 실패
     timeout-minutes: 100
     steps:
       - name: Set up Go 1.23
@@ -337,7 +337,7 @@ jobs:
   UI_UT:
     env:
       UI_UT: true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # D1: ubuntu-latest(26.04)는 sudo-rs가 sudo -E 환경을 넘기지 않아 UTTEST·dind 실패
     timeout-minutes: 100
     steps:
       - uses: actions/setup-node@v6
